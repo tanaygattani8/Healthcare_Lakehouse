@@ -245,8 +245,8 @@ logic rather than predicted from noise.
 
 | # | Phase | Ships |
 |---|---|---|
-| 1 | Calibrate + land + **deploy ugly** | Live URL day one. Row counts measured. **Readmission base-rate gate.** |
-| 2 | Silver clinical model + **thin Airflow DAG** | Conformed EHR tables, terminology mapping, first DAG |
+| 1 | Calibrate + land + **deploy ugly** | Live URL day one. Row counts measured. **Readmission base-rate gate.** Pipeline as an Asset Bundle. |
+| 2 | Silver clinical model + **thin Airflow DAG** | Conformed EHR tables, terminology, first DAG, Synthea container, GitHub Actions CI |
 | 3 | PII governance + **de-identification AI** | UC masks/filters/tags, NER, F1 vs. ground truth, k-anonymity |
 | 4 | Gold + PySpark track + reconciliation | Business tables, the diff notebook |
 | — | **spec boundary — re-plan from here** | |
@@ -265,8 +265,50 @@ Measure the actual 30-day readmission base rate and class balance **before**
 committing to it as the ML target. If degenerate, pivot the target
 (cost/utilization, or care-gap prediction) rather than discovering it in phase 6.
 
-## 10. Explicitly cut
+## 10. CI/CD, Docker, Kubernetes
 
+Raised after the phase 1–4 spec was first written; folded in.
+
+**CI/CD — in, and moved to phase 1.** Databricks Asset Bundles define the
+pipeline as YAML from the first commit, deployed with `databricks bundle
+deploy`. GitHub Actions (free on public repos) runs lint plus `bundle validate`
+on PR and deploys on merge. Streamlit Cloud already redeploys on push.
+
+The timing is the whole point: a pipeline click-created in the UI must be
+rewritten as YAML when CI arrives, whereas YAML on day one makes every later
+deployment nearly free. Not extra work — different work.
+
+Two Free Edition degradations, documented rather than hidden: one workspace
+means `dev`/`prod` are separate *catalogs* rather than separate workspaces, and
+a PAT in GitHub secrets stands in for a service principal, with OIDC as the
+upgrade path.
+
+**Docker — already present, now made real.** Airflow runs on Compose from
+phase 2, but running someone else's compose file teaches nothing. Added: a
+Synthea generator image (Java, pinned version, config, volume upload). It pins
+the generator so datasets stay reproducible, and gives Airflow a real unit of
+work instead of a shell script assuming a local Java install.
+
+**Kubernetes — rejected.** Nothing here needs a cluster: Databricks is
+serverless and not ours to orchestrate, Airflow is one DAG, Streamlit is hosted.
+Managed K8s costs real money monthly and a local cluster cannot be linked to, so
+it would be the only component that is pure resume vocabulary with nothing
+behind it — the first thing a sharp interviewer probes.
+
+If the executor model is wanted later purely as a learning exercise, the honest
+version is Airflow on a local `kind` cluster via the official Helm chart with
+`KubernetesPodOperator` running the Synthea container: $0, genuinely different
+from Compose, phase 8 at the earliest, and labelled in the README as a learning
+exercise rather than an architectural need.
+
+**Scope bill paid:** `dim_code` semantic search deferred from phase 2 to phase 5.
+It consumes the single Vector Search endpoint and is more useful next to the
+phase 5 text-to-SQL eval harness. Phase 2 keeps the dimension; only the search
+layer moves.
+
+## 11. Explicitly cut
+
+- **Kubernetes** — see §10.
 - **Real-time model serving endpoint** — batch scoring into a gold table feeds
   the dashboard and app identically. Costs quota, adds ops surface. Add later in
   an afternoon if an interviewer asks.
@@ -275,7 +317,7 @@ committing to it as the ML target. If degenerate, pivot the target
   same code as an App on demand for a screen-share.
 - **PySpark head-to-head beyond 2 tables.**
 
-## 11. The scope rule
+## 12. The scope rule
 
 Adopted deliberately, because the real risk to this project is scope, not any
 technical decision:
@@ -285,7 +327,7 @@ technical decision:
 Eight phases, no deadline, depth-first, and four comparison axes is the shape
 that dies at phase 4. This rule is what keeps it alive.
 
-## 12. Open questions
+## 13. Open questions
 
 - Exact Synthea row counts and byte sizes — resolved by phase 1 calibration.
 - Readmission base rate viability — phase 1 decision gate.
@@ -294,6 +336,9 @@ that dies at phase 4. This rule is what keeps it alive.
   regex/rules baseline first so there is a number to beat.
 - Final choice of the 2 PySpark head-to-head tables — decide in the phase 4 spec.
 
-## 13. Next step
+## 14. Next step
 
-Write the spec for phases 1–4 → `docs/specs/`.
+~~Write the spec for phases 1–4.~~ Done →
+[specs/2026-08-07-phases-1-4-design.md](specs/2026-08-07-phases-1-4-design.md)
+
+Next: implementation plan for phase 1.
