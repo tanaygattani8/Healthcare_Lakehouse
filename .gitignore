@@ -1,0 +1,18 @@
+# Synthea output — never committed
+synthea/output/
+synthea/*.jar
+
+# Secrets
+.env
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Databricks
+.databricks/
