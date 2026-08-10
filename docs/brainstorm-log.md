@@ -329,8 +329,19 @@ that dies at phase 4. This rule is what keeps it alive.
 
 ## 13. Open questions
 
-- Exact Synthea row counts and byte sizes — resolved by phase 1 calibration.
-- Readmission base rate viability — phase 1 decision gate.
+- ~~Exact Synthea row counts and byte sizes~~ — **resolved**, phase 1
+  calibration → [calibration.md](calibration.md). 3.28M rows and 631 MB of CSV
+  compress to **47 MB of Parquet**, so the lakehouse is nowhere near the quota.
+  The surprise was elsewhere: the clinical notes are **384 MB**, 8x all the
+  Parquet combined, and one cumulative note per patient runs to a **3.6 MB
+  maximum**. Phase 3 must chunk — recorded in spec §4.3.
+- ~~Readmission base rate viability~~ — **resolved: PROCEED**, phase 1 decision
+  gate → [readmission-gate.md](readmission-gate.md). 1,265 index admissions,
+  **15.97%** base rate, inside the real-world 15–20% band. Readmission stays the
+  ML target for phases 4 and 6; the cost/utilization fallback is not needed.
+  One debt handed forward: the gate does not merge overlapping stays or
+  transfers into a single index admission, which costs ~3 points of base rate.
+  Gold must, and spec §2.4 records it.
 - Which NER approach for de-identification (rules baseline → clinical NER model
   → LLM via Foundation Model APIs) — decide in the phase 3 spec, but ship a
   regex/rules baseline first so there is a number to beat.
