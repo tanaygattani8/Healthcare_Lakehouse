@@ -1,0 +1,274 @@
+# Decision log
+
+Every decision taken **while writing code** — the library, the API, the
+approach to a bug, the shortcut accepted and its ceiling. Newest at the bottom;
+append, never rewrite. If a decision here is later reversed, add a new entry
+saying so rather than editing the old one — the wrong turn is the useful part.
+
+**How this differs from the other two documents.** Keeping the boundary sharp is
+what stops all three from converging into the same file:
+
+| Document | Holds | Written when |
+|---|---|---|
+| `brainstorm-log.md` | Pre-implementation design decisions — what to build, what was rejected | Before code exists. Frozen. |
+| `decision.md` (this) | Implementation decisions — how it was built and why that way | While writing code |
+| `flow.md` | Mechanics — entry points, call order, what changed | After code changes |
+
+A decision belongs here if a reasonable engineer could have chosen otherwise and
+would want to know why we didn't.
+
+---
+
+## D1 — Backfilled entries
+
+Entries D2–D14 were written retroactively on 2026-08-15, covering Tasks 1–4.
+They are reconstructed from the code, the commits and the session that produced
+them, so the reasoning is accurate but the wording is not contemporaneous.
+Everything from D15 onward is written as it happens.
+
+---
+
+## Task 1 — Repository scaffolding
+
+### D2 — DuckDB for all local measurement, not pandas
+
+**Decision.** Every local measurement script reads CSV through DuckDB rather
+than loading it with pandas.
+
+**Why.** DuckDB queries CSV files directly from disk with SQL and never
+materialises the file in memory. `observations.csv` alone is 382 MB at the dev
+tier and roughly 10 GB at the 30k main tier — pandas would need the whole thing
+resident, DuckDB streams it. The project is also SQL-primary by design, so
+measurement code in SQL matches the pipeline code that follows.
+
+**Alternative rejected.** pandas with `chunksize`. It works, but it is more code
+for a worse result, and it would have meant writing the same aggregations twice
+in two dialects.
+
+### D3 — pyarrow left unpinned while everything else is pinned
+
+**Decision.** `requirements.txt` pins exact versions for every dependency
+except pyarrow.
+
+**Why.** `pyarrow==17.0.0` produced a `ResolutionImpossible` against
+`databricks-sql-connector==3.4.0`, which constrains the pyarrow range itself.
+We do not care which pyarrow we get — it exists only so pandas can read and
+write Parquet — so the pin was removed rather than hunting for the exact
+compatible version. Resolved to 16.1.0. The reason is recorded as a comment in
+the file so nobody "fixes" it later by adding a pin back.
+
+### D4 — Entity list deliberately duplicated
+
+**Decision.** `scripts/entities.py` holds the 12 entities, and
+`pipelines/medallion/bronze/bronze.py` will hold the same list again rather
+than importing it.
+
+**Why.** `bronze.py` runs inside a Lakeflow Declarative Pipeline, where
+importing from the repo root is version-dependent friction. Twelve strings are
+cheaper to duplicate than to fight the import path. The docstring in
+`entities.py` says so explicitly and instructs keeping them in sync — a
+deliberate duplication that is documented is maintainable; an undocumented one
+is a bug waiting.
+
+---
+
+## Task 2 — Synthea dev tier
+
+### D5 — `generate.append_numbers_to_person_names = false`
+
+**Decision.** Override the Synthea default so generated names are `Benjamin
+Littel`, not `Abdul218`.
+
+**Why.** This is the highest-stakes decision in phase 1 and it was nearly
+missed. Phase 3's de-identification benchmark is the project's AI centerpiece,
+and its headline number is name-detection F1. With trailing digits left on, the
+regex `[A-Za-z]+\d+` would score near-perfectly and the entire staged
+baseline-to-model comparison would measure nothing. Off, names look like real
+names and the detection task is honest.
+
+**Why it is dangerous.** It fails *silently*. Everything runs, every number is
+produced, and only the meaning is destroyed. Recorded in `synthea.properties`,
+`synthea/README.md`, `CLAUDE.md` and spec §4.3 for that reason.
+
+**How it was found.** By reading an actual smoke-test note rather than trusting
+the config. Worth repeating on the other generators.
+
+### D6 — Fixed seeds and a fixed reference date
+
+**Decision.** `-s 12345 -cs 12345 -r 20260101`, all three together.
+
+**Why.** Without `-r`, the dataset shifts every run because Synthea generates
+relative to today, which would silently invalidate every committed measurement.
+All three are needed for true reproducibility: population seed, clinician seed,
+and reference date.
+
+### D7 — Smoke-test with 3 patients before any full run
+
+**Decision.** Run 3 patients into a disposable directory before committing to a
+full generation.
+
+**Why.** A full run takes over ten minutes; three patients takes seconds. This
+caught the Java 15 `UnsupportedClassVersionError` and the `Abdul218` naming
+problem before either cost a full run. Recorded as a procedure in
+`synthea/README.md`.
+
+### D8 — Java 17+ required, installed as Temurin 21 LTS
+
+**Decision.** Install Eclipse Temurin 21 rather than working around the existing
+JDK 15.
+
+**Why.** The Synthea jar is compiled to class file version 61, which requires
+Java 17 or newer. There is no workaround. Temurin 21 is the current LTS.
+Installed alongside JDK 15 rather than replacing it, so `java` on PATH may still
+resolve to the old one — the documented command calls the Temurin binary by
+absolute path.
+
+---
+
+## Task 3 — Calibration
+
+### D9 — `con.read_csv(...).write_parquet(...)` instead of `COPY ... TO`
+
+**Decision.** Use the DuckDB relation API to write the Parquet probe file.
+
+**Why.** The original approach used
+`COPY (...) TO $2 (FORMAT PARQUET)` with a bound parameter for the output path
+and failed with `Parser Error: syntax error at or near "$2"`. DuckDB's `COPY ...
+TO` target is a **filename literal, not an expression**, so it cannot be a bound
+parameter. `$1` works in the same statement because it sits inside
+`read_csv_auto(...)`, which is expression position.
+
+**Alternative rejected.** f-stringing the path into the SQL. It works, but then
+we own quote-escaping for a Windows path for no benefit. The relation API takes
+the path as a Python argument, so there is nothing to escape.
+
+### D10 — Measure Parquet bytes, not just CSV bytes
+
+**Decision.** Write each file out as Parquet and measure the result, rather than
+estimating from CSV size.
+
+**Why.** Delta Lake stores Parquet. CSV is text — the code `44054006` costs 8
+bytes on every row, where Parquet dictionary-encodes it to near nothing.
+Measured: 631 MB of CSV becomes 47 MB of Parquet, a factor of 13. Sizing the
+Free Edition quota from CSV would over-provision by that factor. The project's
+rule is that numbers are measured, never assumed, and this is the clearest case
+of why.
+
+### D11 — `note_stats` reports total bytes and max length, not just count and mean
+
+**Decision.** Amend the interface the spec originally specified.
+
+**Why.** Two measured facts made count-and-mean insufficient. First, the note
+corpus is **384 MB against 47 MB of Parquet for all twelve entity CSVs
+combined** — a sizing document that omits the largest thing on disk is not a
+sizing document. Second, mean note length is 335,034 characters but the maximum
+is **3,620,548**, 10.8× higher, because Synthea writes one cumulative note per
+patient so length tracks lifetime encounter count. Context-window planning needs
+the max.
+
+**Consequence recorded elsewhere.** Spec §4.3 now carries "notes must be
+chunked" as a phase 3 design constraint, along with the two problems chunking
+brings: spans straddling chunk boundaries, and F1 having to be scored per note
+after reassembly rather than per chunk. Scoring per chunk would inflate the
+headline number — the same silent-failure shape as D5.
+
+### D12 — `SystemExit` when no input files are found
+
+**Decision.** Both `calibrate.py` and `readmission_gate.py` exit non-zero when
+their input is missing, rather than writing an empty report.
+
+**Why.** Without the guard, a wrong `--output-dir` produces a structurally
+valid report full of zeros, writes it over the committed one, and exits 0. Both
+reports are decision records that later phases extrapolate from. A
+plausible-looking wrong report is worse than a crash, because a crash gets
+fixed.
+
+**How it was found.** A dedicated review subagent ran the failure case rather
+than reasoning about it.
+
+---
+
+## Task 4 — Readmission gate
+
+### D13 — `LEAD` lookahead kept despite a known undercount
+
+**Decision.** Find the next admission with
+`LEAD(admitted) OVER (PARTITION BY patient_id ORDER BY admitted)`, accepting
+that it undercounts, rather than switching to a min-after-discharge subquery or
+implementing CMS transfer merging.
+
+**Why.** 122 of 1,292 dev-tier inpatient encounters overlap a neighbouring
+stay. Because `LEAD` orders by admission date, an overlapping stay can occupy
+the lookahead slot and mask a genuine readmission of the stay it overlaps.
+
+Both available shortcuts are wrong in opposite directions, and we measured the
+gap rather than guessing:
+
+| Approach | Base rate |
+|---|---|
+| `LEAD` (shipped) | 15.97% |
+| min-after-discharge | 19.37% |
+| CMS transfer merging | correct, not implemented |
+
+min-after-discharge is not a fix — it errs in the mirror image by attributing
+one readmission to two index stays. The genuinely correct answer merges
+overlapping stays and transfers into a single index admission, which is real
+work and belongs in phase 4's gold layer where the production label is built.
+
+**Why shipping the cheap one is safe here.** The gate answers one question: is
+this label worth building on? Both variants clear every `verdict()` threshold
+and return the same PROCEED. The decision is robust to the choice, so the code
+should not pay for the difference.
+
+**Debt recorded in.** A `ponytail:` comment on `GATE_SQL`, a "Known limitation"
+section in the generated report, spec §2.4 as a phase 4 obligation, and
+`test_overlapping_stay_blocks_the_lookahead` so a later "fix" fails loudly.
+
+### D14 — Two tests beyond the plan's nine
+
+**Decision.** Add `test_verdict_covers_every_branch` and
+`test_overlapping_stay_blocks_the_lookahead`.
+
+**Why.** The Task 3 review mutation-tested the calibration suite and found 8 of
+18 mutants surviving, including one that swapped the Parquet total for the CSV
+total — the exact number the report tells the reader to use. The lesson
+generalised: `verdict()` is pure branching that produces the project's go/no-go
+and had zero coverage, which is precisely the shape that passes review untested
+and then ships the wrong call. Its boundaries are pinned to PROCEED (exactly 500
+admissions, exactly 1%, exactly 60%) so an off-by-one in a threshold cannot flip
+a decision silently.
+
+The overlap test exists to make D13 visible. Without it the shortcut is
+invisible in the code and someone "improves" it in six months.
+
+### D15 — Calendar-day semantics for the readmission window
+
+**Decision.** `date_diff('day', ...)` counts calendar-day boundaries crossed,
+not elapsed 24-hour periods, and this is kept deliberately.
+
+**Why.** It matches CMS: a Tuesday 23:00 discharge followed by a Wednesday 02:00
+admission is 1 day, not 0. The `> 0` test is what makes same-day re-entry a
+transfer rather than a readmission. Real Synthea timestamps carry times of day
+(17:04:22, not midnight), so this distinction is live rather than theoretical.
+Documented as a SQL comment because the behaviour is non-obvious and looks like
+a bug to anyone expecting elapsed-time arithmetic.
+
+---
+
+## Process
+
+### D16 — This file, `flow.md`, and explain-then-quiz
+
+**Decision.** From 2026-08-15, three additions to how work proceeds: log
+implementation decisions here, document execution mechanics in `flow.md`, and
+before any major change explain it in plain language and quiz the user 3–5
+questions, implementing only once they pass.
+
+**Why.** The project's stated purpose is hands-on learning, not shipped
+software. Code that appears without being understood defeats the point, and the
+existing documents capture *what was decided* without capturing *how it runs* or
+*why the implementation went that way*.
+
+**Boundary set deliberately.** Three overlapping documents converge into three
+copies of the same file unless the split is explicit, so the table at the top of
+this file defines it and `flow.md` repeats it.
