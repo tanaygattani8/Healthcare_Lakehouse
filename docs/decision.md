@@ -272,3 +272,45 @@ existing documents capture *what was decided* without capturing *how it runs* or
 **Boundary set deliberately.** Three overlapping documents converge into three
 copies of the same file unless the split is explicit, so the table at the top of
 this file defines it and `flow.md` repeats it.
+
+---
+
+## Task 5 — Databricks setup
+
+### D17 — Databricks CLI installed via winget, not pip
+
+**Decision.** `winget install Databricks.DatabricksCLI` (v1.14.1), replacing the
+plan's original `pip install databricks-cli`.
+
+**Why.** Two different products share the name. `pip install databricks-cli`
+installs the **legacy** Python CLI, which is deprecated and has **no `bundle`
+command**. The modern CLI is a standalone Go binary versioned 1.x and is not
+distributed on PyPI at all. Task 7, every later deployment, and the spec's
+bundles-not-clicks decision (§2.5) all require `databricks bundle deploy`, so
+the pip route would have appeared to work at Task 5 and failed two tasks later
+with an error that looks like a missing subcommand rather than a wrong install.
+
+**Consequence.** The venv is irrelevant to the CLI. `databricks-sql-connector`
+in the venv is a different thing again — a Python library for querying a SQL
+warehouse from code, used by `run_sql.py` and later the snapshot publisher.
+Three similarly-named things, one of which is a trap.
+
+**Also worth knowing.** winget updates PATH, so the shell that ran the install
+cannot see the binary; a new terminal is required. And `databricks --version`
+reporting `0.x` means the legacy CLI is shadowing the new one on PATH.
+
+### D18 — CLI auth in `~/.databrickscfg`, Python auth in `.env`
+
+**Decision.** Let `databricks configure --token` write `~/.databrickscfg` for
+the CLI, and keep `.env` for the Python scripts, rather than forcing both onto
+one mechanism.
+
+**Why.** Each tool has a native convention and both are safe: `.databrickscfg`
+lives in the home directory, outside the repo entirely, and `.env` is gitignored
+and verified. Unifying them would mean either exporting `.env` into the
+environment in every shell before any CLI call — friction on every command,
+forever — or teaching the Python scripts to parse `.databrickscfg`, which is
+code written to avoid a file that already works.
+
+**Cost accepted.** The token is stored twice, so revoking it means updating two
+places. That is one extra edit on an event that happens roughly annually.
