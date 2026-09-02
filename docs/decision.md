@@ -13,6 +13,10 @@ what stops all three from converging into the same file:
 | `brainstorm-log.md` | Pre-implementation design decisions — what to build, what was rejected | Before code exists. Frozen. |
 | `decision.md` (this) | Implementation decisions — how it was built and why that way | While writing code |
 | `flow.md` | Mechanics — entry points, call order, what changed | After code changes |
+| `errors.md` | Failures — the symptom verbatim, the cause, the fix | When something breaks |
+
+`decision.md` is keyed by **choice**; `errors.md` is keyed by **symptom**. An
+error that forced a choice appears in both, cross-linked.
 
 A decision belongs here if a reasonable engineer could have chosen otherwise and
 would want to know why we didn't.
@@ -314,3 +318,52 @@ code written to avoid a file that already works.
 
 **Cost accepted.** The token is stored twice, so revoking it means updating two
 places. That is one extra edit on an event that happens roughly annually.
+
+---
+
+## Task 6 — upload
+
+### D19 — `mkdir` runs unconditionally rather than being checked first
+
+**Decision.** `upload.ps1` calls `databricks fs mkdir "$target"` on every run,
+with no prior existence check.
+
+**Why.** Verified idempotent — exit 0 on a second run against an existing
+directory. A `fs ls`-then-branch would be two round trips to do what one
+already does correctly, and the branch would itself need error handling for the
+"ls failed for some other reason" case.
+
+**What it fixes.** A freshly created Unity Catalog volume is empty, and
+`fs cp` does not create intermediate directories. `landing` existed; `landing/csv`
+did not. → [E13](errors.md)
+
+### D20 — every external command call gets an exit check
+
+**Decision.** `upload.ps1` throws on a non-zero `$LASTEXITCODE` after both the
+`mkdir` and each `cp`.
+
+**Why.** Without it the script printed twelve consecutive errors and still
+finished with `Done.`. PowerShell does not stop on a native command's failure,
+so the exit code is the only signal, and nothing was reading it.
+
+**Pattern, not a one-off.** This is the third instance of the same shape — the
+zeroed calibration report ([E7](errors.md)), the mutation survivors
+([E8](errors.md)), and now this. A script that cannot fail is a script that
+lies, and this project's outputs are decision records. Any loop calling an
+external command gets an exit check.
+
+### D21 — entity-list duplication stays trusted, not yet enforced
+
+**Decision.** `upload.ps1` keeps its own copy of the twelve entities, matching
+`scripts/entities.py`, with a comment tying them together. No test enforces the
+match yet.
+
+**Why now.** `immunizations` had silently gone missing from the upload list —
+11 entities against 12 ([E15](errors.md)). Nothing failed; Task 7 would have
+built an empty bronze table and the debugging would have started in Auto Loader,
+two tasks downstream of the typo.
+
+**Why not enforced yet.** `bronze.py` in Task 7 will carry the same twelve a
+third time, and a test written now would need rewriting then. **The debt is
+explicit: write that test as part of Task 7, covering all three lists at once.**
+The duplication itself remains correct for the reason in [D4](decision.md).

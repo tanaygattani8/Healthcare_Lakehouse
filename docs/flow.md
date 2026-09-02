@@ -4,11 +4,13 @@ How execution actually travels through this codebase: entry points, what calls
 what, in what order, and what changed each cycle.
 
 **Scope.** Mechanics only. *Why* a thing is built the way it is belongs in
-[decision.md](decision.md); *what* is being built belongs in the spec. If an
-entry here starts explaining a tradeoff, it is in the wrong file.
+[decision.md](decision.md); a broken thing and its fix belong in
+[errors.md](errors.md); *what* is being built belongs in the spec. If an entry
+here starts explaining a tradeoff, it is in the wrong file.
 
-**Current state: phase 1, Tasks 1–4 of 10.** Everything below runs locally. No
-code touches Databricks yet — that begins at Task 5.
+**Current state: phase 1, Tasks 1–6 of 10.** Tasks 1–4 run entirely on the
+laptop. Task 5 opens a connection to Databricks and Task 6 pushes data across
+it — see cycles 6 and 7 at the bottom for the two entry points that added.
 
 ---
 
@@ -245,4 +247,47 @@ later phases extrapolate from and must survive.
 ### Cycle 5 — 2026-08-15 · process
 
 - Added `docs/decision.md` and `docs/flow.md`.
+- No code changed. No flow changed.
+
+### Cycle 6 — 2026-09-02 · Task 5 · Databricks setup
+
+- **New entry point:** `python -m scripts.run_sql <file.sql>`. Needs the venv —
+  it imports `databricks.sql` from `databricks-sql-connector`.
+- Added `scripts/run_sql.py`: `_statements()` splits a file naively on `;`,
+  `run_file()` opens one warehouse connection and executes each statement in
+  order, `main()` takes a path argument.
+- Added `setup/00_catalogs.sql` — 14 statements creating two catalogs, five
+  schemas each, and a `bronze.landing` volume in each.
+- Auth reaches the code through `os.environ`: `DATABRICKS_HOST` (scheme
+  stripped), `DATABRICKS_HTTP_PATH`, `DATABRICKS_TOKEN`, all from `.env`.
+- The Databricks CLI was installed separately and authenticates through
+  `~/.databrickscfg` — a different path from the Python scripts entirely.
+
+### Cycle 7 — 2026-09-02 · Task 6 · upload
+
+- **New entry point:** `powershell -File scripts/upload.ps1`. Does **not** need
+  the venv — no Python runs; it shells out to the `databricks` binary.
+- Added `scripts/upload.ps1`. Flow: create the target directory, then loop the
+  twelve entities, skipping any whose local CSV is absent, `fs cp --overwrite`
+  each one, throwing on a non-zero exit.
+- Result: 12 CSVs at `/Volumes/healthcare_dev/bronze/landing/csv/`, ~631 MB.
+  This is what Task 7's Auto Loader will read.
+
+**First cross-machine boundary in the project.** Everything before this ran
+entirely on the laptop. From here the flow leaves the machine:
+
+```
+synthea/output/csv/   ──upload.ps1──►   /Volumes/healthcare_dev/bronze/landing/csv/
+   [local, gitignored]                        [Unity Catalog volume]
+                                                        │
+                                                        ▼
+                                            Task 7: Auto Loader → bronze
+```
+
+`scripts/entities.py` now has its list duplicated in two places — `upload.ps1`
+and, from Task 7, `bronze.py`. Nothing enforces the match yet ([D21](decision.md)).
+
+### Cycle 8 — 2026-09-02 · process
+
+- Added `docs/errors.md`, backfilled E1–E15 covering Tasks 1–6.
 - No code changed. No flow changed.
