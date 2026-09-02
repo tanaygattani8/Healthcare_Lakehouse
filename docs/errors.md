@@ -38,6 +38,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E13](#e13) | `Error: no such directory: /Volumes/…/csv` | 6 |
 | [E14](#e14) | Upload prints errors, then prints `Done.` | 6 |
 | [E15](#e15) | One entity silently absent from the upload | 6 |
+| [E16](#e16) | Commit lands with a failing lint gate | 6 |
 
 ---
 
@@ -337,17 +338,47 @@ between `upload.ps1`, `entities.py` and eventually `bronze.py` is deliberate
 lists is about six lines and belongs before `bronze.py` hardcodes the same
 twelve a third time.
 
+### E16 — a commit lands with `ruff` failing {#e16}
+
+**Cause.** The verification command was
+`pytest ... | tail -3 && ruff check . | tail -2 && git commit ...`. Piping
+through `tail` replaces `ruff`'s exit code with `tail`'s, which is always 0. The
+`&&` chain therefore continued past a failing gate and committed. `ruff` had
+printed `Found 1 error` in plain sight and the chain ignored it.
+
+**The underlying fault** was `scripts/run_sql.py:1 I001` — one missing blank
+line before the first `def`. Trivial, auto-fixed with `ruff check --fix .`.
+
+**The real error is the verification, not the lint.** This is the same shape as
+[E7](#e7), [E8](#e8) and [E14](#e14): a check that cannot fail. Those three were
+found in the project's own scripts. This one was in the command used to verify
+the project's scripts, which is worse — a broken gate silently downgrades every
+"tests pass, lint clean" claim made through it.
+
+**Fix.** Let the checker's own exit code govern. Either run it bare:
+
+```bash
+ruff check .
+```
+
+or, if the output genuinely needs trimming, capture the status first rather than
+piping it away. In a pipeline, `$?` belongs to the last command.
+
+**Lesson.** Trimming output for readability is not free — it discards the exit
+code, which is the part the `&&` was reading.
+
 ---
 
 ## Patterns
 
-Fifteen entries, and they fall into four shapes.
+Sixteen entries, and they fall into four shapes.
 
-**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15.**
-Six of fifteen produced no error at all. Every one of them would have shipped a
+**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16.**
+Seven of sixteen produced no failure signal at all. Every one of them would have shipped a
 plausible wrong number. The crashes in this file cost minutes; these are the
 ones that would have cost the project its credibility. **A tool that cannot
-fail cannot be trusted when it succeeds.**
+fail cannot be trusted when it succeeds** — and E16 shows the rule applies to
+the verification commands too, not just the code under test.
 
 **2. Errors in the plan, not the typing — E4, E6, E9, E10.**
 Four came from reference code and expectations written before anything ran.

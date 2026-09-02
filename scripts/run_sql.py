@@ -6,6 +6,7 @@ from pathlib import Path
 
 from databricks import sql
 
+
 def _statements(text: str) -> list[str]:
     return [s.strip() for s in text.split(";") if s.strip()]
 
