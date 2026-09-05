@@ -291,3 +291,62 @@ and, from Task 7, `bronze.py`. Nothing enforces the match yet ([D21](decision.md
 
 - Added `docs/errors.md`, backfilled E1–E15 covering Tasks 1–6.
 - No code changed. No flow changed.
+
+## Entry point 3 — the bronze pipeline (runs on Databricks)
+
+**Invoked as:** `databricks bundle deploy -t dev` then `databricks bundle run medallion -t dev`
+**Reads:** `/Volumes/healthcare_dev/bronze/landing/csv/<entity>/`
+**Writes:** twelve streaming tables `healthcare_dev.bronze.br_<entity>`
+
+Unlike entry points 1 and 2, no `main()` runs. Lakeflow **imports** `bronze.py`,
+and the import itself registers the tables:
+
+```
+databricks bundle run
+└── Lakeflow reads databricks.yml
+    ├── serverless: true, catalog/schema from the target's variables
+    ├── configuration → spark.conf: landing_path, batch_id
+    └── imports pipelines/medallion/bronze/bronze.py
+        │
+        ├── LANDING_PATH = spark.conf.get("landing_path")
+        │
+        └── for _entity in ENTITIES:          ← its own copy of the 12 names
+            └── make_bronze_table(entity)
+                └── @dlt.table(name=f"br_{entity}")   ← registers, does not run
+                    def _bronze():
+                        readStream.format("cloudFiles")
+                          .option(schemaLocation → _schema/{entity})
+                          .load(csv/{entity}/)         ← directory, not file
+                          .select("*", _source_file, _ingested_at, _batch_id)
+        │
+        └── Lakeflow resolves all 12 flows, then executes them in parallel
+```
+
+`make_bronze_table` is a function rather than a bare loop body for one reason:
+a loop body closes over the loop variable, so all twelve `@dlt.table`
+definitions would resolve `entity` to `payers` at execution time and every table
+would read the same file. The function gives each closure its own binding.
+
+The three `_` columns are the only thing bronze adds. No casting, no cleaning —
+`cloudFiles.inferColumnTypes=false` lands every column as a string.
+
+### Cycle 9 — 2026-09-05 · Task 7 · bronze
+
+- **New entry point** as above. First code in the project that does not run on
+  the laptop.
+- Added `pipelines/medallion/bronze/bronze.py` and `databricks.yml`.
+- Landing layout changed to one directory per entity ([D22](decision.md)); the
+  volume was restructured server-side and `upload.ps1` updated to match.
+- Added `tests/test_entity_lists_match.py`, 2 tests — the three-way list sync
+  [D21](decision.md) deferred until `bronze.py` existed. Suite is now 21.
+- **Verified end to end:** all twelve `br_*` tables hold exactly the row counts
+  `docs/calibration.md` measured locally in DuckDB — 3,277,048 rows total. The
+  local measurement and the lakehouse agree to the row.
+
+```
+synthea/output/csv/     ──upload.ps1──►  landing/csv/<entity>/<entity>.csv
+   [local, gitignored]                            │
+                                                  ▼  Auto Loader
+                                       healthcare_dev.bronze.br_<entity>
+                                            12 streaming tables
+```

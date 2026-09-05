@@ -5,5 +5,13 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# Lakeflow injects `spark` into the module namespace before importing pipeline
+# files, so it is genuinely undefined on this machine and genuinely defined
+# where the code runs. Silencing F821 for the pipeline tree states that once
+# rather than repeating a noqa on every reference. Everything else stays on:
+# these files are still linted for imports, style and bug-prone patterns.
+"pipelines/**" = ["F821"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

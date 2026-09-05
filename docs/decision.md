@@ -367,3 +367,54 @@ two tasks downstream of the typo.
 third time, and a test written now would need rewriting then. **The debt is
 explicit: write that test as part of Task 7, covering all three lists at once.**
 The duplication itself remains correct for the reason in [D4](decision.md).
+
+---
+
+## Task 7 — bronze pipeline
+
+### D22 — one landing directory per entity
+
+**Decision.** The landing volume is laid out as
+`landing/csv/<entity>/<entity>.csv`, one directory per entity, and `bronze.py`
+loads `csv/{entity}/` rather than a file path.
+
+**Why.** Auto Loader watches a directory and tracks which files in it have
+already been read; handed a single file it raises "is not a directory"
+([E18](errors.md)). That forces a choice, and the flat alternative loses on
+merit rather than on ceremony:
+
+| Option | Cost |
+|---|---|
+| Directory per entity *(chosen)* | Restructure once, one line in two files |
+| Flat `csv/` + `pathGlobFilter` | Free today; all twelve streams list all twelve files per poll, forever |
+
+The decider is the second batch. With a directory per entity, ingesting a new
+Synthea run means dropping `patients_2027.csv` into `csv/patients/` — no code
+change, which is the entire reason for using Auto Loader over a plain read. The
+flat layout makes every future batch land in a directory that twelve streams are
+all scanning and filtering.
+
+**Migration cost was near zero.** `databricks fs cp` copies between volume
+paths server-side, so the 631 MB was reorganised without re-uploading.
+
+**Left behind deliberately.** The original flat `csv/*.csv` files still exist,
+duplicating 631 MB. Nothing watches `csv/` itself so they are inert; deleting
+them is pending an explicit go-ahead.
+
+### D23 — the three-way entity list is now enforced, not trusted
+
+**Decision.** `tests/test_entity_lists_match.py` parses the entity list out of
+`upload.ps1` and `bronze.py` and asserts both equal `scripts.entities.ENTITIES`.
+
+**Why now.** [D21](decision.md) deferred this until the third copy existed.
+`bronze.py` created it. The duplication is still correct for the reasons in
+[D4](decision.md) — a Lakeflow pipeline cannot cleanly import from the repo root
+and PowerShell cannot import Python at all — but "keep these in sync" as a
+comment had already failed once ([E15](errors.md)), silently.
+
+**Verified by mutation.** Deleting `immunizations` from either file makes the
+suite fail. A sync test that does not actually catch a missing entity is worse
+than none, because it converts a real risk into a false sense of coverage.
+
+**Bounded on purpose.** It compares list *contents and order*, nothing else. It
+is not a parser for either language, and it should never grow into one.

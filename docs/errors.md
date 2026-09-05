@@ -39,6 +39,10 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E14](#e14) | Upload prints errors, then prints `Done.` | 6 |
 | [E15](#e15) | One entity silently absent from the upload | 6 |
 | [E16](#e16) | Commit lands with a failing lint gate | 6 |
+| [E17](#e17) | `Data source cloudFile is not supported ... on a shared cluster` | 7 |
+| [E18](#e18) | `Input path ... /patients.csv is not a directory` | 7 |
+| [E19](#e19) | `An active update ... already exists for pipeline` | 7 |
+| [E20](#e20) | A scratch script leaves the repo modified | 7 |
 
 ---
 
@@ -369,19 +373,114 @@ code, which is the part the `&&` was reading.
 
 ---
 
+## Task 7 — bronze pipeline
+
+### E17 — a typo that reports itself as a platform restriction {#e17}
+
+```
+[UNSUPPORTED_STREAMING_SOURCE_PERMISSION_ENFORCED] Data source cloudFile
+is not supported as a streaming source on a shared cluster. SQLSTATE: 0A000
+```
+
+Repeated twelve times under roughly 2,000 lines of Scala stack trace.
+
+**Cause.** `spark.readStream.format("cloudFile")` — singular. Auto Loader is
+`cloudFiles`. Every option in the same block was correctly plural; only the
+`format()` call was wrong.
+
+**Why the message lies.** It is quoting the string back. Spark could not resolve
+`cloudFile` to any registered source, then fell through to the shared-cluster
+allowlist check — `DataStreamUtils$.validateAllowedSourceAndOptionsOnPE` in the
+trace. `cloudFiles` is on that allowlist; `cloudFile` is on no list, because it
+does not exist. So a security check fires before the friendly "no such data
+source" error ever gets a chance.
+
+**This cost about ten minutes of believing Free Edition had killed the bronze
+design.** It had not. Auto Loader works fine on serverless.
+
+**Fix.** `format("cloudFiles")`.
+
+**Lesson.** When an error names a capability restriction, first check that the
+thing being restricted is spelled the way you think. The plan had it right; this
+one was hand-typing.
+
+### E18 — Auto Loader handed a file instead of a directory {#e18}
+
+```
+CloudInvalidPathException: Input path s3://.../volumes/.../csv/patients.csv
+is not a directory
+```
+
+**Cause.** `.load(f"{LANDING_PATH}/csv/{entity}.csv")`. Auto Loader watches a
+**directory** for new arrivals and keeps a record of what it has already read.
+A single file is not something it can stand guard over.
+
+**Fix.** One directory per entity — `csv/patients/patients.csv` — and
+`.load(f"{LANDING_PATH}/csv/{entity}/")`. Restructured server-side with
+`databricks fs cp` between volume paths, so nothing was re-uploaded.
+
+**Why not point all twelve at the shared `csv/` directory.** Every stream would
+see every file, and all twelve tables would contain all twelve datasets. A
+`pathGlobFilter` would prevent that, but each stream would still list all twelve
+files on every poll, and the layout would have to be unlearned later. →
+[D22](decision.md)
+
+**Note.** A bug in the *plan*, not in hand-typed code — the fourth of those.
+
+### E19 — `bundle run` refuses because an update is already active {#e19}
+
+```
+Error: An active update '60fb3dc0-...' already exists for pipeline '0a1b3a1c-...'
+```
+
+**Cause.** Not a second run of your own. A failed Lakeflow pipeline **retries
+itself**; `databricks pipelines get-update` showed `cause: RETRY_ON_FAILURE`. A
+pipeline permits only one active update, so the retry blocks a manual run.
+
+**Fix.** Nothing. The retry started after the redeploy, so it was already
+running the fixed code — waiting was both correct and free. `databricks
+pipelines stop <id>` is available but spends a second run's compute for no new
+information.
+
+**Lesson.** After a pipeline failure, check whether it is already retrying
+before launching anything. Confirm what is actually deployed with
+`databricks workspace export <path>` rather than trusting the local file — they
+diverge whenever an edit has not been followed by `bundle deploy`.
+
+### E20 — a scratch mutation script left the repo modified {#e20}
+
+**No error surfaced to the user.** The script crashed with `FileNotFoundError`
+on a wrong interpreter path — and its restore step never ran, so
+`scripts/upload.ps1` sat on disk with `immunizations` deleted. Exactly the
+condition of [E15](#e15), reintroduced by the tooling written to prevent it.
+
+**Cause.** Mutate, test, restore — written as three sequential statements. Any
+failure between the first and third leaves the mutation in place.
+
+**Fix.** `try/finally`, so the restore runs whether or not the test does. The
+corrected version caught both mutants and the full suite confirmed the files
+were back.
+
+**Lesson.** Second entry in a row about the verification rather than the code
+([E16](#e16) was the first). Anything that deliberately breaks a file to check a
+test must restore it in a `finally`, and the check that it restored correctly is
+running the full suite afterwards.
+
+---
+
 ## Patterns
 
-Sixteen entries, and they fall into four shapes.
+Twenty entries, and they fall into four shapes.
 
-**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16.**
-Seven of sixteen produced no failure signal at all. Every one of them would have shipped a
+**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20.**
+Eight of twenty produced no failure signal at all. Every one of them would have shipped a
 plausible wrong number. The crashes in this file cost minutes; these are the
 ones that would have cost the project its credibility. **A tool that cannot
 fail cannot be trusted when it succeeds** — and E16 shows the rule applies to
 the verification commands too, not just the code under test.
 
-**2. Errors in the plan, not the typing — E4, E6, E9, E10.**
-Four came from reference code and expectations written before anything ran.
+**2. Errors in the plan, not the typing — E4, E6, E9, E10, E18.**
+Five came from reference code and expectations written before anything ran.
 Written code is a hypothesis until it executes. When one of these is found, the
 plan gets fixed too, or the next person retypes the bug.
 
@@ -389,8 +488,9 @@ plan gets fixed too, or the next person retypes the bug.
 `Scripts/` not `bin/`, cp1252 not UTF-8, PATH snapshotted at process start.
 None are deep, all cost time, all recur.
 
-**4. Two things with one name — E1, E10, E12.**
+**4. Two things with one name — E1, E10, E12, E17.**
 pyarrow pinned in two places with different opinions; three different products
-called "databricks"; venv layouts that differ by platform. The fix is always the
+called "databricks"; venv layouts that differ by platform; `cloudFile` versus
+`cloudFiles`. The fix is always the
 same: find out which one you actually have before theorising about why it is
 broken.

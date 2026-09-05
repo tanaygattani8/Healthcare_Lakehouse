@@ -1,0 +1,35 @@
+bundle:
+  name: healthcare-lakehouse
+
+variables:
+  catalog:
+    description: Target catalog for this environment
+  landing_path:
+    description: UC volume path holding landed Synthea files
+
+resources:
+  pipelines:
+    medallion:
+      name: medallion-${bundle.target}
+      catalog: ${var.catalog}
+      schema: bronze
+      serverless: true
+      channel: CURRENT
+      libraries:
+        - file:
+            path: pipelines/medallion/bronze/bronze.py
+      configuration:
+        landing_path: ${var.landing_path}
+        batch_id: manual
+
+
+targets:
+  dev:
+    default: true
+    variables:
+      catalog: healthcare_dev
+      landing_path: /Volumes/healthcare_dev/bronze/landing
+  prod:
+    variables:
+      catalog: healthcare
+      landing_path: /Volumes/healthcare/bronze/landing
