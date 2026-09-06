@@ -44,6 +44,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E19](#e19) | `An active update ... already exists for pipeline` | 7 |
 | [E20](#e20) | A scratch script leaves the repo modified | 7 |
 | [E21](#e21) | `KeyError: 'DATABRICKS_HOST'` although `.env` exists | 8 |
+| [E22](#e22) | `I001 Import block is un-sorted` on already-committed code | 10 |
 
 ---
 
@@ -504,12 +505,40 @@ executed code**, and a missing step leaves no trace to review against.
 
 ---
 
+## Task 10 — README
+
+### E22 — a lint violation found in code committed two commits ago {#e22}
+
+```
+app\streamlit_app.py:1:1: I001 [*] Import block is un-sorted or un-formatted
+```
+
+**Cause.** One trailing space after `import pandas as pd`. Ruff's `I` rules
+treat the import block as a single unit, so trailing whitespace inside it
+reports as an *ordering* violation — the message names the wrong defect, which
+is why the file looks perfectly correct when you read it.
+
+**Where it came from.** `app/streamlit_app.py` was committed in `f382b4c`
+without `ruff check .` running first. The linter did not miss it; the linter
+was not asked.
+
+**Fix.** `ruff check . --fix`. One character.
+
+**Note.** The second occurrence of the same shape as [E16](#e16) — a commit
+landing with a lint gate that never ran. E16 was the gate's *exit code* being
+swallowed by a pipe; this one is the gate being skipped outright. Both end in
+the same place: `main` holding code the project's own standard rejects. Nothing
+in the repo enforces the gate yet. A pre-commit hook is the obvious fix and is
+deliberately not built — phase 2 brings CI, which is where it belongs.
+
+---
+
 ## Patterns
 
-Twenty-one entries, and they fall into four shapes.
+Twenty-two entries, and they fall into four shapes.
 
-**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20.**
-Eight of twenty produced no failure signal at all. Every one of them would have shipped a
+**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22.**
+Nine of twenty-two produced no failure signal at all. Every one of them would have shipped a
 plausible wrong number. The crashes in this file cost minutes; these are the
 ones that would have cost the project its credibility. **A tool that cannot
 fail cannot be trusted when it succeeds** — and E16 shows the rule applies to

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import pandas as pd 
+import pandas as pd
 import streamlit as st
 
 SNAPSHOT = Path(__file__).parent.parent / "snapshots" / "bronze_counts.parquet"
