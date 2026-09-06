@@ -43,6 +43,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E18](#e18) | `Input path ... /patients.csv is not a directory` | 7 |
 | [E19](#e19) | `An active update ... already exists for pipeline` | 7 |
 | [E20](#e20) | A scratch script leaves the repo modified | 7 |
+| [E21](#e21) | `KeyError: 'DATABRICKS_HOST'` although `.env` exists | 8 |
 
 ---
 
@@ -468,9 +469,44 @@ running the full suite afterwards.
 
 ---
 
+## Task 8 — snapshot publish
+
+### E21 — `KeyError: 'DATABRICKS_HOST'` with a fully populated `.env` {#e21}
+
+```
+host = os.environ["DATABRICKS_HOST"].replace("https://", "").rstrip("/")
+KeyError: 'DATABRICKS_HOST'
+```
+
+**Cause.** **`.env` is a file, not an environment.** Nothing loads it into
+`os.environ`. The plan created `.env`, wrote `os.environ[...]` in the scripts,
+and never connected the two — no document in the repo mentioned `dotenv`,
+`load_dotenv`, `set -a` or `export`.
+
+**Why it did not surface in Task 5.** `run_sql.py` carries the identical bug. It
+only worked because that shell happened to have the variables exported.
+**Working by accident of shell state is indistinguishable from working**, right
+up until a different shell runs it.
+
+**Fix.** `python-dotenv`, plus `scripts/dbx.py` as the single place that loads
+the file and opens a connection. Both callers now go through it, so the next
+script cannot forget. → [D24](decision.md)
+
+**Second defect, found while fixing the first.** The original raises on
+whichever variable is read first. With all three absent it still names only
+`DATABRICKS_HOST`, sending you to check one setting when three are missing.
+`dbx.connect()` reports the full list and points at `.env.example`.
+
+**Note.** A bug in the *plan*, the sixth. This one is the most instructive of
+them: the plan was internally consistent — create `.env`, read `os.environ` —
+and simply omitted the step that joins the halves. **Reference code is not
+executed code**, and a missing step leaves no trace to review against.
+
+---
+
 ## Patterns
 
-Twenty entries, and they fall into four shapes.
+Twenty-one entries, and they fall into four shapes.
 
 **1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20.**
 Eight of twenty produced no failure signal at all. Every one of them would have shipped a
@@ -479,8 +515,10 @@ ones that would have cost the project its credibility. **A tool that cannot
 fail cannot be trusted when it succeeds** — and E16 shows the rule applies to
 the verification commands too, not just the code under test.
 
-**2. Errors in the plan, not the typing — E4, E6, E9, E10, E18.**
-Five came from reference code and expectations written before anything ran.
+**2. Errors in the plan, not the typing — E4, E6, E9, E10, E18, E21.**
+Six came from reference code and expectations written before anything ran, and
+E21 is the sharpest: the plan was internally consistent and still wrong, because
+it omitted the step joining two halves it had each written correctly.
 Written code is a hypothesis until it executes. When one of these is found, the
 plan gets fixed too, or the next person retypes the bug.
 

@@ -418,3 +418,32 @@ than none, because it converts a real risk into a false sense of coverage.
 
 **Bounded on purpose.** It compares list *contents and order*, nothing else. It
 is not a parser for either language, and it should never grow into one.
+
+---
+
+## Task 8 — snapshot publish
+
+### D24 — `python-dotenv` and a single `scripts/dbx.py`
+
+**Decision.** Add `python-dotenv==1.0.1`, and route every warehouse connection
+through `dbx.connect()`.
+
+**Why a dependency at all.** The alternative is four lines splitting `.env` on
+the first `=`. It handles today's file and quietly mis-parses a quoted value, an
+`export ` prefix, or a value containing `=` — edge cases that surface while
+debugging something else entirely. 19 kB of pure Python is a fair price for not
+owning a parser.
+
+**Why a shared module rather than `load_dotenv()` in each script.** The bug was
+in two scripts, not one ([E21](errors.md)): `run_sql.py` had it too and appeared
+to work only because a shell had exported the variables. Fixing the reported
+caller would have left the other broken-by-luck. Both also carried the same
+`sql.connect(...)` block, so one function removes the duplication and the class
+of bug at once.
+
+**`override=False` is deliberate.** A variable already exported in the shell
+beats `.env`, which is what lets CI inject secrets with no file on disk.
+
+**Failure message widened.** The original raised on whichever variable it read
+first, naming `DATABRICKS_HOST` even when all three were missing. `connect()`
+lists everything absent and points at `.env.example`.

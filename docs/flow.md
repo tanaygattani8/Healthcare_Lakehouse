@@ -350,3 +350,31 @@ synthea/output/csv/     ──upload.ps1──►  landing/csv/<entity>/<entity>
                                        healthcare_dev.bronze.br_<entity>
                                             12 streaming tables
 ```
+
+### Cycle 10 — 2026-09-06 · Task 8 · snapshot publish
+
+- **New entry point:** `python -m scripts.publish_snapshot`. Needs the venv.
+- Added `scripts/dbx.py`. Every warehouse connection now goes through
+  `dbx.connect()`, which calls `load_dotenv()` first — previously nothing loaded
+  `.env` at all and the scripts depended on shell state ([E21](errors.md)).
+- `run_sql.py` rewritten onto it; its duplicated `sql.connect(...)` block is gone.
+- `publish_snapshot.py`: `build_count_query()` builds one `UNION ALL` over the
+  twelve bronze tables, `fetch_counts()` runs it and stamps `captured_at`,
+  `main()` writes `snapshots/bronze_counts.parquet`.
+
+```
+python -m scripts.publish_snapshot
+└── main()
+    ├── fetch_counts(catalog, ENTITIES)
+    │   ├── dbx.connect()            ← load_dotenv, validate, sql.connect
+    │   ├── build_count_query(...)   ← 12 SELECTs joined by UNION ALL
+    │   └── DataFrame + captured_at (UTC)
+    └── to_parquet("snapshots/bronze_counts.parquet")
+```
+
+**The point of this task.** The snapshot is committed to the repo, and the
+Streamlit app reads the Parquet file. The app never opens a warehouse
+connection, so no visitor — or crawler — can wake serverless compute. One
+warehouse query happens when *you* run this script, deliberately.
+
+Aggregates only, never row-level: twelve rows of entity and count.
