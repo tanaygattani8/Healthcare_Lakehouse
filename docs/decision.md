@@ -447,3 +447,43 @@ beats `.env`, which is what lets CI inject secrets with no file on disk.
 **Failure message widened.** The original raised on whichever variable it read
 first, naming `DATABRICKS_HOST` even when all three were missing. `connect()`
 lists everything absent and points at `.env.example`.
+
+---
+
+## Task 9 — the public app
+
+### D25 — the app gets its own `requirements.txt`
+
+**Decision.** `app/requirements.txt` pins exactly what the Streamlit app
+imports — `streamlit`, `pandas`, `pyarrow` — and the root `requirements.txt`
+keeps the full project set unchanged.
+
+**Why not one file.** They serve two different machines. Locally, one
+environment running the tests, the linter, DuckDB calibration and the warehouse
+scripts is correct — splitting it would mean managing two venvs to save
+nothing. On Streamlit Cloud only three packages are ever imported, and the
+extras are not merely unused: `databricks-sql-connector` caps pyarrow below the
+version with wheels for the deploy interpreter, which is precisely what broke
+the deploy ([E23](errors.md)). The unused dependency was the failing one.
+
+**Why this location rather than a `requirements-app.txt` at the root.**
+Streamlit Cloud searches the entrypoint's directory *before* the repo root and
+uses the first dependency file it finds. Putting it next to `streamlit_app.py`
+means Cloud picks it with no configuration, and it sits where a reader looking
+at the app will see it. A root-level second file would need Cloud to be told
+about it and would leave two similarly named files competing at the root.
+
+**Why pinned, and pinned to these versions.** They match the local `.venv`
+exactly, so what is deployed is what was tested. The root file's reasoning for
+leaving pyarrow unpinned ([D3](decision.md)) was the connector's range
+constraint — with the connector gone from this file, the constraint is gone and
+there is no reason not to pin.
+
+**Why `pyarrow` is listed at all** when `streamlit` already depends on it:
+`pd.read_parquet` is our code path's requirement, not a transitive accident.
+An explicit line survives a future release dropping the transitive edge.
+
+**Known ceiling.** Two files now list overlapping packages, and nothing checks
+that the three shared pins agree. If they drift, the app is tested against one
+pandas and deployed against another. Not enforced today — the CI in phase 2 is
+where a check belongs, alongside the lint gate ([E22](errors.md)).

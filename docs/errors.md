@@ -45,6 +45,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E20](#e20) | A scratch script leaves the repo modified | 7 |
 | [E21](#e21) | `KeyError: 'DATABRICKS_HOST'` although `.env` exists | 8 |
 | [E22](#e22) | `I001 Import block is un-sorted` on already-committed code | 10 |
+| [E23](#e23) | `Failed to download and build pyarrow==16.1.0` on Streamlit Cloud | 9 |
 
 ---
 
@@ -533,9 +534,67 @@ deliberately not built — phase 2 brings CI, which is where it belongs.
 
 ---
 
+## Task 9 — the public app
+
+### E23 — `pyarrow` fails to build on Streamlit Community Cloud {#e23}
+
+```
+× Failed to download and build `pyarrow==16.1.0`
+  ╰─▶ Build backend failed to determine requirements with `build_wheel()`
+      ModuleNotFoundError: No module named 'pkg_resources'
+```
+
+**`pkg_resources` is the last domino, not the cause.** Pinning setuptools would
+get past it and straight into compiling Arrow C++ from source on a free build
+box, which fails differently and slower.
+
+**Cause, in order.**
+
+1. Streamlit Cloud built the app on **Python 3.14.7**. Local development is on
+   **3.12.1**. The interpreter was never pinned, so Cloud used its default.
+2. Cloud read the **root `requirements.txt`** — every dependency in the project,
+   including `databricks-sql-connector==3.4.0`.
+3. That connector caps pyarrow at `<17`. The `pyarrow` line is deliberately
+   unpinned ([D3](decision.md)), so the resolver took the highest still allowed:
+   **16.1.0**.
+4. pyarrow 16.1.0 predates Python 3.14. **No cp314 wheel exists**, so uv fell
+   back to a source build.
+5. The source build imports `pkg_resources`, which modern setuptools no longer
+   ships on 3.14.
+
+**Not one bad pin — the whole set.** Further down the same log,
+`pandas-2.2.3.tar.gz` and `duckdb-1.1.3.tar.gz (12.2 MB)` are also source
+tarballs. Neither has a cp314 wheel either. Fixing pyarrow alone would have
+surfaced pandas next.
+
+**The comment that predicted it.** `requirements.txt` already carried a note
+explaining that `databricks-sql-connector` constrains the pyarrow range. It was
+written to justify leaving pyarrow unpinned. It turned out to name the exact
+constraint that broke the deploy — **a documented constraint is not a contained
+one**.
+
+**The real defect.** `app/streamlit_app.py` imports `pathlib`, `pandas` and
+`streamlit`. It reads a committed Parquet snapshot and never opens a warehouse
+connection — that is the whole point of the snapshot design. Yet the deployment
+was installing a database engine and a SQL driver it will never call, and one of
+them is what broke the build. The dependency that has no reason to be there is
+the dependency that failed.
+
+**Fix.** `app/requirements.txt` listing only the three packages the app imports.
+Streamlit Cloud searches the entrypoint's directory before the repo root, so it
+wins at deploy time and the root file is untouched for local work.
+→ [D25](decision.md)
+
+**Still outstanding.** The deploy interpreter is still 3.14 and still unpinned.
+Python version is selectable only at deploy time; changing it means deleting the
+app and redeploying with the same custom subdomain. Until that happens the
+public app runs on a version that is never tested locally.
+
+---
+
 ## Patterns
 
-Twenty-two entries, and they fall into four shapes.
+Twenty-three entries, and they fall into four shapes.
 
 **1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22.**
 Nine of twenty-two produced no failure signal at all. Every one of them would have shipped a

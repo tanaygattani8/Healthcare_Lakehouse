@@ -1,0 +1,17 @@
+# Deployment dependencies for the Streamlit Community Cloud app ONLY.
+#
+# Streamlit Cloud searches the entrypoint's directory before the repo root, so
+# this file wins over the root requirements.txt at deploy time and the root
+# file stays as it is for local development.
+#
+# The app imports pathlib, pandas and streamlit. Nothing else. It reads a
+# committed Parquet snapshot and never opens a warehouse connection, so the
+# pipeline's dependencies do not belong here — and databricks-sql-connector
+# actively broke the build by capping pyarrow below the version with wheels
+# for the deploy interpreter. See errors.md E23.
+#
+# Versions match the local .venv so deployed and local behave the same.
+streamlit==1.39.0
+pandas==2.2.3
+# Explicit, not inherited: pd.read_parquet needs it.
+pyarrow==16.1.0
