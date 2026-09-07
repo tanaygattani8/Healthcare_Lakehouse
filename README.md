@@ -32,7 +32,6 @@ proceed.
 ## Documents
 
 - [Brainstorm log](docs/brainstorm-log.md) — decisions and the reasoning behind them
-- [Spec: phases 1–4](docs/specs/2026-08-07-phases-1-4-design.md)
 - [Calibration](docs/calibration.md) — measured dataset size
 - [Readmission gate](docs/readmission-gate.md) — is the ML target viable
 - [Decision log](docs/decision.md) — why each implementation went the way it did
@@ -52,8 +51,10 @@ ruff check .
 Talking to Databricks needs credentials: copy `.env.example` to `.env` and fill
 it in. `.env` is gitignored.
 
-Regenerating the dataset, deploying the pipeline, and publishing the snapshot
-are documented in [synthea/README.md](synthea/README.md) and the phase 1 plan.
+Regenerating the dataset is documented in
+[synthea/README.md](synthea/README.md). Deploying the pipeline and publishing
+the snapshot run from `databricks bundle deploy` and
+`python -m scripts.publish_snapshot`.
 
 ## Architecture notes
 

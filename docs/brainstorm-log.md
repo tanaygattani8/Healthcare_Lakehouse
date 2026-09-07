@@ -349,7 +349,8 @@ that dies at phase 4. This rule is what keeps it alive.
 
 ## 14. Next step
 
-~~Write the spec for phases 1–4.~~ Done →
-[specs/2026-08-07-phases-1-4-design.md](specs/2026-08-07-phases-1-4-design.md)
+~~Write the spec for phases 1–4.~~ Done — the spec and the phase 1 plan are
+kept locally rather than published; they are working instruments, and their
+conclusions are recorded in `decision.md` and the README.
 
 Next: implementation plan for phase 1.

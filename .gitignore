@@ -16,3 +16,10 @@ venv/
 
 # Databricks
 .databricks/
+
+# Local-only working documents. Deliberately not published: the plan and the
+# spec are working instruments, and CLAUDE.md is addressed to a tool rather
+# than to a reader. The published docs/ files stand on their own.
+CLAUDE.md
+docs/plans/
+docs/specs/
