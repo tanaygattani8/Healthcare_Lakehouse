@@ -514,3 +514,37 @@ the platform provides no file-based way to pin it. **This is the one piece of
 deployment configuration with no representation in git.** If the app is ever
 recreated, the version must be set again by hand, and a deploy that fails on
 source builds is the symptom that it was not.
+
+---
+
+## Process
+
+### D27 — the plan, the spec and `CLAUDE.md` are local, and purged from history
+
+**Decision.** `CLAUDE.md`, `docs/plans/` and `docs/specs/` are gitignored and
+were removed from every commit with `git filter-branch --index-filter`. The rest
+of `docs/` stays published.
+
+**Why these three and not the rest.** They are working instruments. The plan is
+a task list with reference code that is already superseded by what actually
+shipped; the spec is an authority for the author, not an explanation for a
+reader; `CLAUDE.md` is addressed to a tool. The published files answer a
+reader's questions instead: what the data measures (`calibration.md`), whether
+the ML target is viable (`readmission-gate.md`), why the implementation went
+this way (`decision.md`), how it runs (`flow.md`), what broke (`errors.md`).
+
+**Why the rest of `docs/` was argued for.** Removing it was considered and
+rejected. The documentation is the part of this repository that is not
+reproducible from a tutorial, and the README cites it as evidence.
+
+**What the purge cost.** Three commits existed only to add these files and were
+dropped by `--prune-empty`, so the history no longer records that a plan was
+written before the code. Twenty commits remain of twenty-three. The tree at
+`HEAD` is byte-identical before and after — only history changed.
+
+**What it does not achieve.** GitHub keeps unreferenced objects reachable by
+SHA until it garbage-collects, so someone holding an old commit id may still
+fetch the old content for a while. A history purge reduces exposure; it is not
+a revocation. **Nothing sensitive was in these files** — that was verified
+before removal, and it is the only reason this was a tidiness decision rather
+than an incident.
