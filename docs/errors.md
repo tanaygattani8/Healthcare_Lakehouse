@@ -585,10 +585,30 @@ Streamlit Cloud searches the entrypoint's directory before the repo root, so it
 wins at deploy time and the root file is untouched for local work.
 → [D25](decision.md)
 
-**Still outstanding.** The deploy interpreter is still 3.14 and still unpinned.
-Python version is selectable only at deploy time; changing it means deleting the
-app and redeploying with the same custom subdomain. Until that happens the
-public app runs on a version that is never tested locally.
+**Round two — the same message, a new cause.** The next build proved the file
+was found (`-r /mount/src/healthcare_lakehouse/app/requirements.txt (line 14)`,
+41 packages resolved instead of 53) and then failed on `pyarrow==16.1.0` again.
+`app/requirements.txt` pinned that version **by hand**, one line below a comment
+explaining that 16.1.0 is exactly the version with no cp314 wheel. Removing
+`databricks-sql-connector` removed the *reason* 16.1.0 was selected; writing the
+number in manually reinstated the result. **A constraint deleted and a constraint
+re-typed are the same constraint.**
+
+**Real fix.** The pins were never the problem — the interpreter was. Streamlit
+Cloud → app menu → **Settings → General → Python version**, changed from 3.14 to
+**3.12**, matching local development. Save rebuilt the app in place. Every pin
+has a cp312 wheel, so nothing was downloaded as source and nothing was
+recompiled.
+
+**A wrong recommendation, corrected by looking.** The documented procedure —
+and what was recommended here — was to *delete the app and redeploy*, because
+the Python version was historically fixed at deploy time. The settings dialog
+now has an editable dropdown offering 3.10 through 3.14. **The docs described a
+version of the product that no longer exists.** Opening the dialog before
+deleting cost one click and saved an irreversible one.
+
+**Rule this leaves behind.** When a fix requires destroying something, open the
+settings screen first. Documentation ages; the UI is the current truth.
 
 ---
 

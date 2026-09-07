@@ -487,3 +487,30 @@ An explicit line survives a future release dropping the transitive edge.
 that the three shared pins agree. If they drift, the app is tested against one
 pandas and deployed against another. Not enforced today — the CI in phase 2 is
 where a check belongs, alongside the lint gate ([E22](errors.md)).
+
+**Correction.** Pinning to the local versions was right, but it is only
+*coherent* once the deploy interpreter matches the local one — see D26. Pinned
+versions and a different Python are worse than loose versions, because the pin
+guarantees the resolver cannot route around a missing wheel.
+
+### D26 — the deployed app runs Python 3.12, chosen explicitly
+
+**Decision.** Streamlit Cloud's Python version is set to **3.12**, matching the
+local `.venv`, rather than left on the platform default.
+
+**Why not the default.** The default moved to 3.14, which at the time had no
+wheels for pyarrow 16, pandas 2.2.3 or duckdb 1.1.3. Every install became a
+source build and the deploy failed ([E23](errors.md)). Streamlit's own guidance
+is to develop on the version you deploy; taking the default means the public app
+runs on an interpreter that is never once exercised locally.
+
+**Why 3.12 and not the newest with wheels.** 3.12 is what the project's venv,
+`ruff`'s `target-version` and every tested run already use. Matching them costs
+nothing. Chasing the newest interpreter would buy nothing this app can use and
+reintroduce the same wheel-availability gamble on the next Python release.
+
+**Where it lives.** In the Streamlit Cloud app settings, not in the repository —
+the platform provides no file-based way to pin it. **This is the one piece of
+deployment configuration with no representation in git.** If the app is ever
+recreated, the version must be set again by hand, and a deploy that fails on
+source builds is the symptom that it was not.
