@@ -18,16 +18,9 @@ from pathlib import Path
 
 import duckdb
 
-# ponytail: LEAD orders by admission, so when two inpatient stays overlap the
-# lookahead can land on a stay that began before this one discharged, and the
-# genuine next admission is never seen. 122 of 1,292 dev-tier inpatient
-# encounters overlap this way. The correct fix is merging overlapping stays and
-# transfers into a single index admission (CMS methodology) — that belongs in
-# phase 4's gold layer, not in a gate that only has to answer "plausible?".
-# Measured cost of the shortcut on the dev tier: base rate 15.97% here vs
-# 19.37% for a min-after-discharge lookahead, which over-counts in the mirror
-# image by attributing one readmission to two index stays. Both sit inside the
-# real-world 15-20% band and both return the same verdict.
+# ponytail: LEAD undercounts when inpatient stays overlap (122 of 1,292 on the
+# dev tier). Merging overlapping stays per CMS methodology belongs in phase 4's
+# gold layer. Measured cost and reasoning: docs/readmission-gate.md.
 GATE_SQL = """
 WITH inp AS (
     SELECT
@@ -192,9 +185,7 @@ def main() -> None:
         con, csv_dir / "encounters.csv", csv_dir / "patients.csv", args.window_days
     )
 
-    # Same guard as calibrate.py: a wrong --output-dir must not write a
-    # plausible-looking zeroed report over the committed one and exit 0. This
-    # report records a go/no-go decision, so a silent zero is worse than a crash.
+    # A wrong --output-dir must crash, not write a zeroed report and exit 0.
     if result["inpatient_encounters"] == 0:
         raise SystemExit(f"no inpatient encounters found under {csv_dir}")
 

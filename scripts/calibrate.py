@@ -133,10 +133,7 @@ def main() -> None:
             measured["distinct_codes"] = distinct_codes(con, path)
             rows.append(measured)
 
-    # Without this, a wrong --output-dir writes a structurally valid report full
-    # of zeros over the committed one and exits 0. This report is the sizing
-    # authority for every later phase; a plausible-looking wrong one is worse
-    # than a crash.
+    # A wrong --output-dir must crash, not write a zeroed report and exit 0.
     if not rows:
         raise SystemExit(f"no entity CSVs found under {csv_dir}")
 

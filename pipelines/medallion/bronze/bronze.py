@@ -24,11 +24,8 @@ def make_bronze_table(entity: str) -> None:
             .option("cloudFiles.schemaEvolutionMode", "addNewColumns")
             .option("cloudFiles.schemaLocation", f"{LANDING_PATH}/_schema/{entity}")
             .option("header", "true")
-            # A directory, not a file. Auto Loader watches a folder for new
-            # arrivals and remembers what it has already read; handed a single
-            # file it raises "is not a directory". One folder per entity keeps
-            # each stream seeing only its own data, and lets a later batch be
-            # ingested by dropping a file in with no code change.
+            # A directory, not a file — Auto Loader watches folders. One per
+            # entity so each stream sees only its own data.
             .load(f"{LANDING_PATH}/csv/{entity}/")
             .select(
                 "*",

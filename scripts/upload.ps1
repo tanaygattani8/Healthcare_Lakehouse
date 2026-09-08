@@ -3,9 +3,8 @@ param(
     [string]$OutputDir = "synthea/output"
 )
 
-# Keep in sync with scripts/entities.py — bronze builds one streaming table per
-# entity from that list, so an entity missing here produces an empty table two
-# tasks later and looks like an Auto Loader problem.
+# Keep in sync with scripts/entities.py. An entity missing here silently
+# produces an empty bronze table. Enforced by tests/test_entity_lists_match.py.
 $entities = @(
     "patients", "encounters", "conditions", "medications",
     "observations", "procedures", "immunizations", "allergies", "careplans",
@@ -21,18 +20,15 @@ foreach ($entity in $entities) {
         continue
     }
 
-    # One directory per entity. Auto Loader watches a directory, not a file, and
-    # a shared directory would mean all twelve streams ingesting all twelve
-    # files. fs cp does not create intermediate directories; mkdir is idempotent
-    # so this is safe on every run.
+    # One directory per entity: Auto Loader watches directories, not files.
+    # fs cp does not create intermediate directories; mkdir is idempotent.
     $dest = "$target/$entity"
     databricks fs mkdir "$dest"
     if ($LASTEXITCODE -ne 0) { throw "could not create $dest" }
 
     Write-Host "Uploading $entity..."
     databricks fs cp $source "$dest/$entity.csv" --overwrite
-    # Without this the script prints every error and still ends with "Done.",
-    # which is how a fully failed upload gets mistaken for a successful one.
+    # Without this, twelve failed uploads still end with "Done."
     if ($LASTEXITCODE -ne 0) { throw "upload failed for $entity" }
 }
 
