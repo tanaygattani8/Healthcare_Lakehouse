@@ -18,6 +18,10 @@ resources:
       libraries:
         - file:
             path: pipelines/medallion/bronze/bronze.py
+        - file:
+            path: pipelines/medallion/silver/dim_code.sql
+        - file:
+            path: pipelines/medallion/silver/encounter_class_map.sql
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual

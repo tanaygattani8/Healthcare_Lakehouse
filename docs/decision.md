@@ -499,6 +499,66 @@ local. These are measurements of the dataset — the same category as
 they disagree, the file wins and the spec gets corrected. Six of this project's
 errors came from reference code written before anything was run.
 
+### D30 — `code_key` is a hash, not a counter
+
+**Decision.** `xxhash64(system, code)`.
+
+**Why not a counter.** Bronze exists so silver can be dropped and rebuilt
+without re-uploading 631 MB. A counter breaks that: rebuild, and every id is
+reassigned, so every fact row now points at a different code while still
+looking perfectly valid. **The failure is silent and total.** A hash of the
+natural key returns the same id every time, from any machine, in any order.
+
+**Why `xxhash64` rather than `sha2`.** A 64-bit integer instead of a 64-character
+hex string, for a column that appears in every fact table. Collision risk across
+1,246 codes is around 1 in 10^13. Verified after the build: 1,246 rows, 1,246
+distinct keys.
+
+**Why a surrogate key at all**, when `(system, code)` is already unique: one
+join column instead of two in seven fact tables. Thin, but real.
+
+### D31 — latest description wins
+
+**Decision.** Where a code carries more than one description, take the one with
+the most recent timestamp; ties break alphabetically so the result is
+deterministic.
+
+**Why a rule was needed at all.** Not defensive — `6299-2`, `8310-5`, `312961`,
+`133` and others already carry two descriptions each. Without a rule the join
+produces duplicate keys and the build fails.
+
+**Why latest.** Descriptions get revised, not randomised; the newest is the
+current one. The alphabetical tiebreak matters because two rows sharing a
+timestamp would otherwise make the build non-deterministic — it would pass, and
+produce a different answer next time.
+
+### D32 — four canonical encounter classes, and a separate readmission role
+
+**Two deviations from spec §3.4. Both flagged for review.**
+
+**Decision.** `encounter_class_map` maps Synthea's ten encounter classes to
+`acute / post_acute / ambulatory / preventive`, plus a second column
+`readmission_role`.
+
+**Why a fourth class.** The spec names three and lists five encounter classes.
+The data has ten. `snf` and `hospice` are facility stays — calling them
+ambulatory is plainly wrong, and they are not acute care either. The spec never
+considered them because nobody had looked at the data.
+
+**Why a second column.** One column cannot answer both "what kind of care was
+this" and "does this count toward readmission". Conflating them is precisely how
+a transfer to skilled nursing silently becomes a readmission.
+
+**The clinical calls, which are the flagged part.** `snf` is
+`transfer_target` — patients are discharged *to* skilled nursing, so arriving
+there is not a readmission. `hospice` is `excluded` — CMS methodology generally
+removes hospice from the measure rather than classifying it. These change the
+phase 4 number. 625 snf and 191 hospice encounters are affected.
+
+**Enforced, not trusted.** `unmapped_encounter_class` returns every bronze
+class with no mapping. It must stay empty; it is 0 today. An unmapped class
+would otherwise become NULL and drop encounters out of every denominator.
+
 ## Task 9 — the public app
 
 ### D25 — the app gets its own `requirements.txt`
