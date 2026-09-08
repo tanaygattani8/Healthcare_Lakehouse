@@ -660,6 +660,39 @@ both targets. `validate` reaches the workspace API without starting compute,
 which is why the CI workflow is useful even while the workspace cannot run
 anything.
 
+**Resolved after ~35 minutes, cause not fully established.**
+
+The decisive fact: **the SQL warehouse started and ran `SELECT 1` while the
+pipeline could not get compute.** So the account was never locked out and this
+was never the daily-quota lockout the project has been braced for. Whatever was
+exhausted, it was not the whole workspace.
+
+"Failed to create a cluster" is also Databricks' internal wording. Free Edition
+is serverless-only — there is no cluster to create, size or configure, and
+nothing in that sentence is user-actionable.
+
+Sequence, for honesty about what is and is not proven:
+
+| Time | Event |
+|---|---|
+| 23:02 | pipeline run FAILED, warehouse state unknown |
+| 23:16 | retry FAILED |
+| ~23:30 | warehouse started, `SELECT 1` succeeded |
+| ~23:35 | warehouse stopped |
+| 23:37 | pipeline run **COMPLETED** |
+
+Two explanations fit. Either the warehouse was holding capacity the pipeline
+needed, or the shortage was transient and simply passed. **Stopping the
+warehouse is correlated with the success but is not proven to have caused it** —
+the 23:16 retry probably ran with no warehouse up, and still failed. Do not
+record this as "stop the warehouse to fix it"; record it as "not a lockout, it
+cleared on its own timescale".
+
+**The practical rule.** When pipeline compute is refused, check whether a
+warehouse can start before concluding anything. That one query separates "the
+workspace is locked for the day" from "this resource is briefly unavailable",
+and those two have completely different responses.
+
 **1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22.**
 Nine of twenty-two produced no failure signal at all. Every one of them would have shipped a
 plausible wrong number. The crashes in this file cost minutes; these are the

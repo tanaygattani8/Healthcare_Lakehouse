@@ -450,6 +450,55 @@ lists everything absent and points at `.env.example`.
 
 ---
 
+## Phase 2a
+
+### D28 — silver publishes from the same pipeline, addressed by full name
+
+**Decision.** Silver tables are written by the existing `medallion` pipeline
+using fully-qualified names — `@dlt.table(name=f"{CATALOG}.silver.<table>")` —
+with the catalog supplied as a pipeline configuration value, not hardcoded.
+
+**Why it had to be tested rather than assumed.** The pipeline's default schema
+is `bronze`, fixed in `databricks.yml`. Databricks documents that one pipeline
+can publish to several schemas via fully-qualified names, but only in the newer
+default publishing mode, and the migration doc describes how to identify
+*legacy* pipelines without giving the inverse test. The deployed spec has
+`schema` and no `target`, which suggests the newer mode — suggests, not proves.
+
+**How it was settled.** A two-table throwaway spike: one table depending on
+nothing (does writing elsewhere work) and one reading `bronze.br_patients` (does
+reading across schemas work). Two tables rather than one so a failure would
+localise. Both succeeded — `ok` and `1148` — and both were dropped afterwards.
+
+**Why the catalog is configuration.** Databricks' own guidance: code that
+references a second schema should take it as a pipeline parameter rather than
+hardcoding it, so dev and prod differ by configuration alone. `landing_path` and
+`batch_id` already worked this way.
+
+**What this avoided.** The fallback, had it failed, was recreating the pipeline
+in the newer mode — discarding Auto Loader's file-tracking state and forcing a
+re-ingest of 631 MB. Finding that out after writing ten silver tables would have
+been the expensive version.
+
+### D29 — the phase 2 spec's vocabulary model was wrong, and silver follows the data
+
+**Decision.** `dim_code` is built from the measured contents of the files, not
+from the spec's four-source table. Recorded in `silver-model-findings.md`.
+
+**What the measurement changed.** Four things the spec assumed are false:
+`allergies` holds SNOMED *and* RxNorm in one file; SNOMED is written as both
+`http://snomed.info/sct` and `SNOMED-CT`; `procedures` contributes 380 SNOMED
+codes that overlap `conditions` by zero; and codes with two different
+descriptions already exist.
+
+**Why this went in a published document rather than the plan.** The plan is
+local. These are measurements of the dataset — the same category as
+`calibration.md` — and every later decision is checked against them.
+
+**The rule it establishes.** Specs describe intent; files describe fact. Where
+they disagree, the file wins and the spec gets corrected. Six of this project's
+errors came from reference code written before anything was run.
+
 ## Task 9 — the public app
 
 ### D25 — the app gets its own `requirements.txt`
