@@ -46,6 +46,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E21](#e21) | `KeyError: 'DATABRICKS_HOST'` although `.env` exists | 8 |
 | [E22](#e22) | `I001 Import block is un-sorted` on already-committed code | 10 |
 | [E23](#e23) | `Failed to download and build pyarrow==16.1.0` on Streamlit Cloud | 9 |
+| [E24](#e24) | `RESOURCE_EXHAUSTED: Cannot create the resource` on pipeline run | 2a-0 |
 
 ---
 
@@ -612,9 +613,40 @@ settings screen first. Documentation ages; the UI is the current truth.
 
 ---
 
-## Patterns
+## Phase 2a Task 0 — multi-schema spike
 
-Twenty-three entries, and they fall into four shapes.
+### E24 — `RESOURCE_EXHAUSTED` starting the pipeline cluster {#e24}
+
+```
+Failed to create a cluster because you've exceeded resource limits:
+RESOURCE_EXHAUSTED: Cannot create the resource, please try again later.
+```
+
+**What this is not.** It is not a bug in the code, the bundle or the spike.
+`ruff` passed, `bundle validate -t dev` passed, `bundle deploy -t dev` succeeded
+and updated the pipeline. The failure is at cluster creation — before a line of
+pipeline code runs.
+
+**Two candidate causes, and the message does not distinguish them.**
+
+1. Free Edition compute quota consumed, which locks compute for a period.
+2. Transient serverless capacity shortage in the workspace's pool.
+
+The evidence leans to (2): **nothing had been run that day.** The previous
+pipeline update was five days earlier and no warehouse had been woken. A quota
+story requires consumption that did not happen. "Please try again later" is also
+capacity phrasing rather than quota phrasing. Not conclusive.
+
+**Do not diagnose this by probing.** The obvious next move — query a bronze
+table to see whether *anything* can get compute — wakes the SQL warehouse and
+consumes the very resource in question. If cause (1) is real, the diagnostic
+makes it worse. Wait instead.
+
+**The pipeline retries itself.** As in [E19](#e19), a `CREATED` update appeared
+seconds after the two `FAILED` ones with no human action. Checking the pipeline
+state immediately after a failed `bundle run` will show `RUNNING` — that is the
+retry, not a second submission, and starting another run on top of it produces
+"An active update already exists".
 
 **1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22.**
 Nine of twenty-two produced no failure signal at all. Every one of them would have shipped a

@@ -18,9 +18,15 @@ resources:
       libraries:
         - file:
             path: pipelines/medallion/bronze/bronze.py
+        # Temporary — phase 2a Task 0 spike. Remove with the file.
+        - file:
+            path: pipelines/medallion/silver/_spike.py
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual
+        # Silver publishes to a second schema, so the code needs the catalog
+        # name. Passed as config rather than hardcoded so dev and prod differ.
+        catalog: ${var.catalog}
 
 
 targets:
