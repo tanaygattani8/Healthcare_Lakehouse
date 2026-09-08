@@ -1,0 +1,50 @@
+name: PR checks
+
+# Twice, broken code reached main because a check that would have caught it was
+# never run (errors.md E16, E22). This removes the option of forgetting.
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      # Bare, never piped. E16 was `ruff check . | tail`, where the pipe
+      # replaced the failing exit code and the gate reported success.
+      - run: ruff check .
+
+      - run: pytest -q
+
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      # A personal access token is the Free Edition degradation. A service
+      # principal with scoped permissions is what production uses, and OIDC is
+      # the upgrade path. Noted here because this file is where whoever
+      # inherits it will care.
+      - name: Validate both targets
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          databricks bundle validate -t dev
+          databricks bundle validate -t prod
+
+      # Deliberately absent: `bundle deploy -t prod`. It would create a second
+      # pipeline on a tier that permits one, pointed at an empty landing volume,
+      # spending the quota whose exhaustion locks compute for the rest of the
+      # day. See the degradations table in README.md.

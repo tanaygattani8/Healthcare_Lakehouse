@@ -648,6 +648,18 @@ state immediately after a failed `bundle run` will show `RUNNING` — that is th
 retry, not a second submission, and starting another run on top of it produces
 "An active update already exists".
 
+**Retried twenty minutes later. Identical failure.** Not a momentary spike, then
+— but still not proof of quota, because a capacity shortage can last hours. The
+test that separates the two is a run after a long idle period: if it fails after
+a night of zero usage, it is not consumption-based.
+
+**What it did not block.** Everything in phase 2a that does not need a cluster
+still ran: the local DuckDB exploration of all eighteen CSVs
+(`silver-model-findings.md`), `ruff`, `pytest`, and `bundle validate` against
+both targets. `validate` reaches the workspace API without starting compute,
+which is why the CI workflow is useful even while the workspace cannot run
+anything.
+
 **1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22.**
 Nine of twenty-two produced no failure signal at all. Every one of them would have shipped a
 plausible wrong number. The crashes in this file cost minutes; these are the
