@@ -95,13 +95,24 @@ day spent looking for a bug that is not there.
 | `observations.VALUE` not numeric where `TYPE` says numeric | 0 |
 | conditions/observations/medications/procedures pointing at a missing patient | 0 |
 
-Synthea generates internally consistent data. Every type casts, every date
-orders correctly, every foreign key resolves.
+Synthea generates *mostly* internally consistent data. Every type casts, every
+date orders correctly in the columns checked above, every foreign key resolves.
 
-**So the quarantine tables will be empty, and an empty quarantine table is
-indistinguishable from a quarantine mechanism that does not work.** The only way
-to know the mechanism functions is to break a row deliberately and watch it
-arrive. That is Task 7's last step and it is not optional.
+**Correction, found after the silver build ran.** The check above tested
+`encounters` for `STOP` before `START` and did not test `medications`.
+**104 medication rows have a stop date six days before their start date** — for
+example an insulin prescription starting 1978-08-22 and stopping 1978-08-16.
+They are quarantined, correctly, and they are the only rows in the entire
+quarantine layer.
+
+The lesson is about the measurement, not the data: a clean result is only as
+broad as the checks written, and "nothing fails" was reported after checking one
+table for a rule that applies to five.
+
+**One consequence stands.** With 104 rows out of 3.28 million failing, the
+quarantine tables are nearly empty — and a nearly empty quarantine table is hard
+to distinguish from a mechanism that does not work. Breaking a row deliberately
+and watching it arrive is still worth doing.
 
 ## 6. Ten encounter classes, not the five the spec names
 

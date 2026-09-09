@@ -1,7 +1,7 @@
 -- One row per (system, code) across every vocabulary in the dataset.
--- Six source paths, four systems: allergies carries both SNOMED and RxNorm,
+-- Twelve source paths, four systems: allergies carries both SNOMED and RxNorm,
 -- and procedures contributes 380 SNOMED codes that overlap conditions by zero.
--- Measured in docs/silver-model-findings.md. Expected: 1,246 rows.
+-- Measured in docs/silver-model-findings.md. Expected: 1,340 rows.
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.dim_code
 COMMENT "Conformed medical codes. Every clinical fact references code_key."
@@ -23,6 +23,25 @@ WITH sourced AS (
     SELECT 'RxNorm', CODE, DESCRIPTION, START FROM ${catalog}.bronze.br_medications
     UNION ALL
     SELECT 'CVX', CODE, DESCRIPTION, DATE FROM ${catalog}.bronze.br_immunizations
+    UNION ALL
+    SELECT 'SNOMED', CODE, DESCRIPTION, START FROM ${catalog}.bronze.br_careplans
+
+    -- Encounter type codes. 181,699 of 187,540 encounters carry a code that
+    -- appears in no other file.
+    UNION ALL
+    SELECT 'SNOMED', CODE, DESCRIPTION, START FROM ${catalog}.bronze.br_encounters
+
+    -- Reason codes. A "why" is as much a clinical code as a "what", and
+    -- careplans alone contributes 38 codes found nowhere else -- without these,
+    -- every careplan row would fail its code lookup and quarantine whole.
+    UNION ALL
+    SELECT 'SNOMED', REASONCODE, REASONDESCRIPTION, START FROM ${catalog}.bronze.br_encounters
+    UNION ALL
+    SELECT 'SNOMED', REASONCODE, REASONDESCRIPTION, START FROM ${catalog}.bronze.br_procedures
+    UNION ALL
+    SELECT 'SNOMED', REASONCODE, REASONDESCRIPTION, START FROM ${catalog}.bronze.br_medications
+    UNION ALL
+    SELECT 'SNOMED', REASONCODE, REASONDESCRIPTION, START FROM ${catalog}.bronze.br_careplans
 ),
 
 normalised AS (

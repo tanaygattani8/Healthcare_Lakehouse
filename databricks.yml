@@ -22,6 +22,14 @@ resources:
             path: pipelines/medallion/silver/dim_code.sql
         - file:
             path: pipelines/medallion/silver/encounter_class_map.sql
+        - file:
+            path: pipelines/medallion/silver/patient.sql
+        - file:
+            path: pipelines/medallion/silver/encounter.sql
+        - file:
+            path: pipelines/medallion/silver/condition.sql
+        - file:
+            path: pipelines/medallion/silver/facts.sql
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual
