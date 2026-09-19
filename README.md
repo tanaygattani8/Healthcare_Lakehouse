@@ -56,6 +56,31 @@ Regenerating the dataset is documented in
 the snapshot run from `databricks bundle deploy` and
 `python -m scripts.publish_snapshot`.
 
+Before pushing a change to pipeline SQL, check it compiles without building
+anything:
+
+```bash
+databricks bundle deploy -t dev
+databricks pipelines start-update <pipeline-id> --validate-only
+```
+
+Not in CI: it needs Databricks compute, and running it on every pull request
+spends the daily quota whose exhaustion locks the workspace.
+
+### Orchestration (Airflow, needs Docker Desktop)
+
+```bash
+cd orchestration
+docker compose --env-file ../.env up airflow-init
+docker compose --env-file ../.env up -d
+```
+
+Open http://localhost:8080 (airflow / airflow) once `docker compose ps` shows
+every service `(healthy)`, and trigger the `medallion` DAG by hand. It is never
+scheduled: on Free Edition a timer-driven run can exhaust the daily quota
+unattended. `--env-file ../.env` is how Airflow gets the Databricks credentials —
+there is no second credential file.
+
 ## Architecture notes
 
 - **Bronze does nothing.** No casting, no cleaning, no dedup. Every column

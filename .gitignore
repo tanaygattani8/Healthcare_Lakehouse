@@ -22,3 +22,9 @@ CLAUDE.md
 docs/plans/
 docs/specs/
 docs/learning/
+
+# Airflow runtime and credentials
+orchestration/.env
+orchestration/logs/
+orchestration/config/
+orchestration/plugins/

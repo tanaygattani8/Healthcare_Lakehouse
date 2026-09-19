@@ -47,6 +47,14 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E22](#e22) | `I001 Import block is un-sorted` on already-committed code | 10 |
 | [E23](#e23) | `Failed to download and build pyarrow==16.1.0` on Streamlit Cloud | 9 |
 | [E24](#e24) | `RESOURCE_EXHAUSTED: Cannot create the resource` on pipeline run | 2a-0 |
+| [E25](#e25) | `Triggering new runs for organization … is currently disabled temporarily` | 2b-1 |
+| [E26](#e26) | Docker Desktop: "virtualisation support wasn't detected" | 2b-3 |
+| [E27](#e27) | `500 Internal Server Error for API route … dockerDesktopLinuxEngine` mid-build | 2b-3 |
+| [E28](#e28) | Docker won't start: `rename … .sock … The file cannot be accessed by the system` | 2b-3 |
+| [E29](#e29) | Rebuilt jar's manifest says `Build-Version: N/A` | 2b-3 |
+| [E30](#e30) | Container run: `Records: total=1138`, `OutOfMemoryError`, exit 0 | 2b-3 |
+| [E31](#e31) | Same seeds, different dataset — `1147`, every table off | 2b-3 |
+| [E32](#e32) | First DAG run: `httpx.ReadTimeout: timed out`, task never started | 2b-5 |
 
 ---
 
@@ -693,8 +701,250 @@ warehouse can start before concluding anything. That one query separates "the
 workspace is locked for the day" from "this resource is briefly unavailable",
 and those two have completely different responses.
 
-**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22.**
-Nine of twenty-two produced no failure signal at all. Every one of them would have shipped a
+---
+
+## Phase 2b Task 1 — submitted run
+
+### E25 — `Triggering new runs for organization … is currently disabled temporarily` {#e25}
+
+```
+$ databricks jobs submit --json @submit.json
+Error: Triggering new runs for organization 7474655569061305 is currently disabled temporarily.
+```
+
+**Not the request.** The JSON was never read — the refusal is for the whole
+organization (the workspace), before validation. Nothing in the file or the
+command was wrong: the identical command, unchanged, succeeded the next day.
+
+**Cause not established.** Free Edition throttling or a quota window are the
+likely candidates; the message names neither. It is a different message from
+[E24](#e24) and was not diagnosed by probing, for E24's reason.
+
+**Cleared on its own within a day** (failed 17 Sep, succeeded 18 Sep 15:49).
+Work that needed no Databricks — the Synthea image and Airflow files — carried
+on meanwhile.
+
+**Rule.** "Disabled temporarily" means wait, not retry. Repeated submits against
+a throttle are at best useless.
+
+---
+
+## Phase 2b Task 3/4 — Docker on Windows
+
+### E26 — Docker Desktop: "virtualisation support wasn't detected" {#e26}
+
+```
+Docker Desktop failed to start because virtualisation support wasn't detected.
+```
+
+**The message points at the wrong layer.** It reads like a BIOS problem. It was
+not:
+
+```
+systeminfo | findstr /i "Hyper-V Virtualization hypervisor"
+    Virtualization Enabled In Firmware: Yes
+```
+
+Firmware was fine. What was missing was **Windows'** half: the WSL and Virtual
+Machine Platform features, which Docker Desktop on Windows 11 Home runs inside.
+No `A hypervisor has been detected` line in that output was the tell.
+
+**Fix**, in an Administrator prompt, then a restart:
+
+```
+bcdedit /set hypervisorlaunchtype auto
+wsl --install --no-distribution
+```
+
+Verified by `wsl --status` (default version 2) and `docker run --rm hello-world`
+exiting 0.
+
+**Two traps on the way.** `systeminfo | Select-String …` fails in Command
+Prompt — `Select-String` is PowerShell; use `findstr /i` in `cmd`. And the first
+`hello-world` check was run as `docker run … | Select-Object -First 3`, which
+closed the pipe after three lines and killed the image pull mid-download — an
+[E16](#e16) repeat: a truncating pipe on a verification command. Rerun bare.
+
+### E27 — `request returned 500 Internal Server Error for API route … dockerDesktopLinuxEngine` mid-build {#e27}
+
+```
+request returned 500 Internal Server Error for API route and version
+http://%2F%2F.%2Fpipe%2FdockerDesktopLinuxEngine/_ping
+```
+
+**Cause: two builds in parallel on an 8 GB laptop.** The Synthea build (a clone
+of Synthea's full history, then Gradle) and the Airflow image build were started
+together. Host RAM was 7.9 GB total, 1.1 GB free; Docker's VM is capped at
+~4 GB (`hv_balloon: Max. dynamic memory size: 4022 MB` in `vm/init.log`). The
+VM's log stops mid-clone and the engine stopped answering.
+
+**Fix.** One Docker build at a time on this machine. And the clone was replaced
+by a single-commit fetch (`git fetch --depth 1 origin <sha>`) — the build needs
+one commit, not Synthea's history.
+
+**Orphaned builds.** Stopping the shell that launched `docker build` does **not**
+stop the `docker.exe` client on Windows — the build carries on, invisible, still
+writing to the same log. It happened twice here and produced a log with two
+interleaved builds in it. Before starting a build, check for survivors:
+
+```
+Get-CimInstance Win32_Process -Filter "Name='docker.exe'" | Select ProcessId,CommandLine
+```
+
+Stopping that client process (`Stop-Process -Id <pid>`) cancels its build and is
+safe; it is not Docker Desktop.
+
+### E28 — Docker Desktop won't start: `rename … sailor-ingest.sock … The file cannot be accessed by the system` {#e28}
+
+```
+starting services: initializing Ingest server: listening on
+unix://C:/Users/<HOST>/AppData/Local/Docker/run/sailor-ingest.sock: rename …
+sailor-ingest.sock.stale: The file cannot be accessed by the system.
+```
+
+**Self-inflicted, while recovering from E27.** Docker Desktop was restarted by
+force-killing its processes (`Stop-Process -Force`) plus `wsl --shutdown`. That
+left Unix-socket files (0-byte reparse points) behind that Windows would then
+neither delete nor let Docker rename.
+
+**What did not work.** `Remove-Item -Force` and `cmd /c del /f` both: "The file
+cannot be accessed by the system." Renaming the containing folder aside worked,
+and Docker then failed identically on the next socket, in
+`%LOCALAPPDATA%\docker-secrets-engine\engine.sock`. Chasing sockets one folder
+at a time is whack-a-mole.
+
+**Fix: restart Windows.** It releases every stale socket at once; Docker started
+cleanly afterwards. The two folders renamed aside
+(`Docker\run.stale-20260918`, `docker-secrets-engine.stale-20260918`) are
+disposable.
+
+**Rule.** Quit Docker Desktop from its tray menu. Never force-kill it.
+
+### E29 — rebuilt Synthea jar says `Build-Version: N/A` {#e29}
+
+Silent: the build succeeded and the jar ran. Only reading its manifest showed
+it:
+
+```
+original  Build-Version: 7e08387
+rebuilt   Build-Version: N/A
+```
+
+**Cause.** Synthea's `build.gradle` reads `src/main/resources/version.txt` into
+the manifest when the jar task is *configured*, but the task that writes that
+file (via `git describe --tags --always`) runs later. A fresh checkout never has
+the file in time, so the stamp falls back to `N/A`. Synthea's own CI build had
+it from an earlier step. The file is also packaged into the jar, so this is not
+only a label.
+
+**Fix.** The Dockerfile writes `version.txt` itself with the same command before
+running Gradle. Rebuilt jar: `Build-Version: 7e08387` and `version.txt` =
+`7e08387`, matching the original on both. Size 197,024,930 bytes against the
+original's 197,024,912 — identical code, different embedded timestamps.
+
+**Why it mattered.** The image exists to pin a version.
+
+### E30 — container generates 1,138 patients, not 1,148, and exits 0 {#e30}
+
+```
+java.lang.OutOfMemoryError: Java heap space      (repeated)
+Records: total=1138, alive=995, dead=143
+exit=0
+```
+
+**Silent wrongness, the worst kind in this file.** The run finished, printed a
+cheerful "You've just generated 1138 patients!", and returned success. Ten
+patients were missing, and nothing but the count said so.
+
+**Cause.** The JVM defaults its heap to a quarter of the memory it can see.
+Inside Docker Desktop's ~4 GB VM that is ~1 GB; the recorded run on the laptop
+had ~2 GB (a quarter of 8 GB). Synthea generates patients on worker threads; a
+thread that runs out of heap loses that patient and the run carries on.
+
+**Fix.** `-Xmx3g` in the image's entrypoint. Heap size does not change what a
+seed generates — only whether generation survives.
+
+**Rule.** Check `Records: total=… alive=… dead=…` against the recorded
+`1148 / 1000 / 148`, and search the log for `OutOfMemoryError`, before trusting
+any generation run. Exit code 0 means nothing here.
+
+### E31 — same jar, same seeds, same config, different dataset {#e31}
+
+With E30 fixed, the container still did not reproduce `calibration.md`:
+
+```
+Records: total=1147, alive=1000, dead=147        (recorded: 1148 / 1000 / 148)
+encounters 189,032 (recorded 187,540) · organizations 825 (826) · every table off
+```
+
+**Not the seeds.** 1,143 of 1,147 patient `Id`s matched the recorded run —
+the seeds reached the jar. But only 893 matched on name and birth date, and
+tables that do not depend on patients (organizations, providers) differed too.
+
+**Cause, from diffing the two runs' `metadata/*.json`.** Every setting matched
+except one:
+
+```
+endTime   recorded: 20260808    container: 20260918
+```
+
+**Synthea simulates every life up to the day it is run.** `-r` fixes the
+reference date; it does not fix the end. The recorded dataset stops on 8 Aug
+2026; the container ran on 18 Sep and simulated six more weeks — more
+encounters, different deaths, and a different population drawn from the same
+seeds.
+
+**This was wrong since phase 1.** `synthea/README.md` said the three seeds were
+sufficient for reproducibility. They were never sufficient: the recorded
+command, rerun on any later day, gives a different dataset. Nobody had rerun it
+until now, which is the only reason it went unnoticed.
+
+**Fix.** `-e 20260808` in the image's entrypoint — the recorded run's own date,
+read from its metadata — and the README corrected. Synthea at this commit
+accepts `-e endDate as YYYYMMDD`. A jar that cannot say
+which version it is defeats the pin even when the code inside is right.
+
+---
+
+## Phase 2b Task 5 — the DAG
+
+### E32 — first DAG run fails in under a minute: `httpx.ReadTimeout: timed out` {#e32}
+
+```
+[error] Workload execution failed.  [airflow.executors.local_executor.LocalExecutor]
+httpx.ReadTimeout: timed out
+Executor LocalExecutor reported that the task instance … finished with state
+failed, but the task instance's state attribute is queued.
+```
+
+**Never reached Databricks.** No run was submitted. In Airflow 3 a task's first
+act is an HTTP call to the API server's `/execution/` endpoint to say it has
+started. That call timed out.
+
+**Cause: triggered before the API server had finished starting.** Its log shows
+`Waiting for application startup` at 02:14:52 and the first request served at
+02:18:21 — three and a half minutes, with the scheduler and DAG processor still
+`health: starting` alongside it on a 4 GB VM. The task's call waited 78 s.
+`/api/v2/monitor/health` had already answered 200, which is why it looked ready.
+
+**Fix: wait for every service to report `(healthy)` in
+`docker compose ps`, not just the health URL.** The identical trigger, five
+minutes later, succeeded.
+
+**Also on Windows:** task log files are named `run_id=manual__2026-09-19T02:16:53…`
+— colons, which Windows cannot open (`OSError: [Errno 22] Invalid argument`).
+Read them inside the container:
+`docker compose exec airflow-scheduler cat "/opt/airflow/logs/dag_id=…/attempt=1.log"`,
+or in the web UI.
+
+---
+
+## Patterns
+
+**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22, E29, E30, E31.**
+Twelve of thirty-two produced no failure signal at all. Phase 2b added three in
+one task: a jar that could not name its version, a run that dropped ten patients
+and exited 0, and a "reproducible" command that had never been reproducible. Every one of them would have shipped a
 plausible wrong number. The crashes in this file cost minutes; these are the
 ones that would have cost the project its credibility. **A tool that cannot
 fail cannot be trusted when it succeeds** — and E16 shows the rule applies to
@@ -707,9 +957,11 @@ it omitted the step joining two halves it had each written correctly.
 Written code is a hypothesis until it executes. When one of these is found, the
 plan gets fixed too, or the next person retypes the bug.
 
-**3. Windows-specific environment friction — E5, E11, E12.**
+**3. Windows-specific environment friction — E5, E11, E12, E26, E27, E28, E32.**
 `Scripts/` not `bin/`, cp1252 not UTF-8, PATH snapshotted at process start.
-None are deep, all cost time, all recur.
+Phase 2b added Docker's: WSL missing behind a BIOS-sounding message, 4 GB for
+everything, sockets that survive a force-quit, orphaned `docker.exe` clients,
+log filenames with colons. None are deep, all cost time, all recur.
 
 **4. Two things with one name — E1, E10, E12, E17.**
 pyarrow pinned in two places with different opinions; three different products

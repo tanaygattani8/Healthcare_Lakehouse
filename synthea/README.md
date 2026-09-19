@@ -5,9 +5,14 @@
 ```
 java -jar synthea/synthea-with-dependencies.jar \
   -c synthea/synthea.properties \
-  -p 1000 -s 12345 -cs 12345 -r 20260101 \
+  -p 1000 -s 12345 -cs 12345 -r 20260101 -e 20260808 \
   Massachusetts
 ```
+
+`-e 20260808` was **not** in the original command. Without it Synthea simulates
+up to the day it runs, so the same seeds give a different dataset every day
+(errors.md E31). 20260808 is the day the recorded dataset was generated, read
+from its `metadata/*.json`.
 
 Requires **Java 17 or higher**. The jar is compiled to class file version 61;
 an older JDK fails with `UnsupportedClassVersionError`. Built here with
@@ -19,10 +24,33 @@ Temurin 21.0.12 LTS.
 | Population seed `-s` | 12345 | Reproducibility |
 | Clinician seed `-cs` | 12345 | Reproducibility |
 | Reference date `-r` | 20260101 | Without a fixed reference date the dataset shifts every run |
+| End date `-e` | 20260808 | Without it the simulation runs to today, and the dataset shifts every day |
 | State | Massachusetts | Single state keeps geography simple for phase 3 ZIP suppression |
 
-All three seeds are required together. Output is gitignored — the jar is too
+All four are required together. Output is gitignored — the jar is too
 (188 MB).
+
+## Or with Docker — no local Java, and no jar to find
+
+The jar used above was Synthea's rolling `master-branch-latest` build, since
+overwritten, so it cannot be downloaded again. The image builds the same code
+from its permanent commit, `7e08387` (decision.md D35):
+
+```
+docker build -t healthcare-synthea:7e08387 synthea/
+docker run --rm -v C:\synthea-test:/data healthcare-synthea:7e08387
+```
+
+**It reproduces the dataset's shape, not the exact dataset.** Same code, config
+and seeds; 861 of 1,148 patients come out identical, totals ~0.2% off. Cause
+not yet identified — decision.md D35.
+
+Output lands in `C:\synthea-test\synthea\output\`. Mount a scratch directory,
+never `synthea/output/` — a wrong image would overwrite the only copy of the
+dataset `calibration.md` describes. The seeds, reference date and properties
+file are baked into the image.
+
+Build one image at a time on an 8 GB machine (errors.md E27).
 
 ## Result of the recorded run
 

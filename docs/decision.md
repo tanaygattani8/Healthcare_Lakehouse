@@ -559,6 +559,167 @@ phase 4 number. 625 snf and 191 hospice encounters are affected.
 class with no mapping. It must stay empty; it is 0 today. An unmapped class
 would otherwise become NULL and drop encounters out of every denominator.
 
+## Phase 2b — orchestration and reproducibility
+
+### D33 — `DatabricksSubmitRunOperator` with a `pipeline_task`, not `RunNow`
+
+**Deviation from spec §3.7**, which names `DatabricksRunNowOperator`.
+
+**Why not RunNow.** It takes `job_id` or `job_name` and nothing else. It runs
+**Jobs**; the medallion is a **Pipeline**, a different object. Using it would
+mean creating a Job resource purely to wrap the pipeline.
+
+**Why SubmitRun.** It sends a one-time run to `runs/submit` with a
+`pipeline_task`, then polls it to a terminal state. Trigger and wait are one
+task, and nothing new has to exist in the workspace.
+
+**Proven before Airflow existed.** `databricks jobs submit` calls the same
+endpoint. Run on 18 Sep: `TERMINATED SUCCESS` after ~5 minutes; the pipeline's
+update history showed a new `COMPLETED` update with cause `JOB_TASK`; and
+`list-pipelines` still showed exactly one pipeline — a submitted run starts
+the existing pipeline, it does not create a second one against Free Edition's
+one-pipeline limit. The first attempt, the day before, was refused for reasons
+unrelated to the request ([E25](errors.md#e25)).
+
+**Proven to fail properly, through Airflow**, with 2a's second real bug put back
+(`SELECT * EXCEPT (violations)`):
+
+| Run | Airflow task | Databricks |
+|---|---|---|
+| Good SQL | green, ~5 min | `COMPLETED`, cause `JOB_TASK` |
+| Broken SQL | **red**, ~14 min | `FAILED` once + 5 × `RETRY_ON_FAILURE`, then stopped; `UNRESOLVED_COLUMN … violations` |
+| Reverted | green | `COMPLETED` |
+
+The task log shows the operator polling `RUNNING` and ending on the terminal
+state, so green means the pipeline *finished*, not that it was *submitted*.
+`retries=0` held: one burst of the pipeline's own retries, no second round from
+Airflow.
+
+**One gap.** The Airflow log says only "refer to the logs for this pipeline in
+the pipelines page" — the actual `UNRESOLVED_COLUMN` lives in Databricks'
+pipeline events, one hop away. Red is reliable; the reason is not in Airflow.
+
+### D34 — no sqlfluff; `--validate-only` is the SQL check
+
+**Deviation from spec §3.9.**
+
+**Why not sqlfluff.** Tested with 4.3.0, `databricks` dialect: it cannot parse
+`CONSTRAINT … EXPECT … ON VIOLATION DROP ROW`, which nine tables use. Default
+config fails those nine forever; `ignore = parsing` makes them pass and also
+passes `SELECT a,, b` with exit 0. Neither configuration can catch broken SQL
+here, and both SQL bugs this project has actually hit were parse errors.
+
+**Why `--validate-only`.** Databricks compiles the pipeline's real source against
+the real catalog without materialising anything. Proven on 18 Sep with 2a's
+actual bug put back in (`CONSTRAINT` after `TBLPROPERTIES`):
+
+| Run | Result |
+|---|---|
+| Current SQL | `COMPLETED`, ~90 s |
+| `CONSTRAINT` moved after `TBLPROPERTIES` | `FAILED` — `PARSE_SYNTAX_ERROR … at or near 'CONSTRAINT'` |
+| Reverted | `COMPLETED` |
+
+**Why local, not CI.** It needs Databricks compute; running it on every pull
+request spends the quota whose exhaustion locks the workspace. It is written
+into the README as the step before pushing pipeline SQL.
+
+**What would reverse this.** sqlfluff's dialect learning `CONSTRAINT … EXPECT`.
+
+### D35 — Synthea built from commit `7e08387`; reproduction is partial
+
+**Decision.** `synthea/Dockerfile` builds Synthea from commit
+`7e08387c68a7f0e21d13076609a159fd473fc902` and bakes in the recorded seeds,
+reference date, end date and properties file.
+
+**Why a commit, not a release.** The recorded dataset came from Synthea's rolling
+`master-branch-latest` build, overwritten on 18 Aug. The newest stable release,
+v4.0.0, is different code and means re-baselining every phase 1 measurement. A
+commit hash cannot be overwritten.
+
+**What was verified.** The rebuilt jar matches the original on commit
+(`Build-Version: 7e08387`, after [E29](errors.md#e29)), JDK (17.0.20) and size
+to within 18 bytes. The runtime is the same Java 21.0.12 as the recorded run.
+
+**What was not achieved: an identical dataset.** Three generation runs:
+
+| Run | Patients | Identical patient rows | Cause of difference |
+|---|---|---|---|
+| Default heap | 1,138 | — | JVM out of memory ([E30](errors.md#e30)) |
+| `-Xmx3g` | 1,147 | — | simulated to run date ([E31](errors.md#e31)) |
+| `-Xmx3g -e 20260808` | 1,147 | **861 of 1,148** | **not identified** |
+
+The last run matches the recorded one on patient `Id` for 1,143 people and on
+the longest clinical note to the character, but about a quarter of patients
+differ and the totals are ~0.2% off (3,269,605 rows against 3,277,048).
+
+**Stopped at the time-box, deliberately.** The plan set two hours for this
+task, and each diagnostic run costs 35 minutes. Candidate causes, none tested:
+thread scheduling in Synthea's multi-threaded generator; provider assignment
+depending on shared state across threads; the recorded run's end being
+22:18 UTC on 8 Aug where `-e` ends at midnight.
+
+**What this means in practice.** The container regenerates a dataset **of the
+same shape and scale** — same code, same config, same population seeds — but
+not the byte-identical one `calibration.md` measured. The committed
+measurements remain true of the dataset actually in the lakehouse. What cannot
+be claimed is "rerun this and get the same numbers".
+
+**Open decision, not taken here.** Either (a) spend runs on the candidates
+above, cheapest first: one run with `--generate.thread_pool_size=1`
+(single-threaded; the default `-1` uses every core) tests the threading theory
+directly, though the recorded run was multi-threaded too, so a match is not
+guaranteed even if threading is the cause; or (b) accept "same shape" reproducibility and
+say so in the README; or (c) re-baseline phase 1 on a container-generated
+dataset so the image and the measurements agree by construction.
+
+### D36 — the snapshot stays a manual step after the DAG
+
+**Deviation from spec §3.7**, which had the DAG publish the snapshot.
+
+The snapshot's output is a committed file; it only reaches the live app after a
+commit and push, which a DAG cannot and should not do. Automating it would turn
+two human steps into one while adding container plumbing, three credentials and
+a new failure mode — a half-automation that looks finished and is not.
+
+**What would change this.** Anything consuming the snapshot without a human in
+between.
+
+### D37 — Airflow reads the repo's one `.env`; no second credential file
+
+**Deviation from the 2b plan**, which had the token copied into
+`orchestration/.env`.
+
+**Decision.** `docker compose --env-file ../.env` makes the root `.env`'s
+`DATABRICKS_HOST` and `DATABRICKS_TOKEN` available to the compose file, which
+builds `AIRFLOW_CONN_DATABRICKS_DEFAULT` from them as a JSON connection.
+
+**Why.** Two files holding the same token means two places to rotate it and
+two places for it to leak. With one, the token is never typed into a second
+file, a DAG, or Airflow's UI. `orchestration/.env` stays gitignored anyway, in
+case anyone creates one.
+
+**Cost.** Every compose command needs `--env-file ../.env`. Forgetting it gives
+a connection with an empty host and token, which fails loudly at the first
+Databricks call rather than silently.
+
+### D38 — Airflow on LocalExecutor, five containers not eight
+
+**Deviation from the stock compose file**, which runs CeleryExecutor with Redis,
+a Celery worker and a triggerer.
+
+**Why.** Celery exists to spread tasks across machines; there is one laptop.
+Docker Desktop here gets ~4 GB of an 8 GB machine, and the one time two builds
+shared it the engine froze ([E27](errors.md#e27)). LocalExecutor runs tasks as
+scheduler subprocesses: no broker, no worker. The triggerer only serves
+deferrable operators, and `DatabricksSubmitRunOperator` runs non-deferrable by
+default.
+
+**Measured.** postgres, api-server, scheduler and DAG processor together use
+~1.15 GB at idle.
+
+**What would reverse it.** Deferrable operators (bring back the triggerer), or
+more than one machine running tasks (bring back Celery).
+
 ## Task 9 — the public app
 
 ### D25 — the app gets its own `requirements.txt`

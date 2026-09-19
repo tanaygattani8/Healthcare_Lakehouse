@@ -378,3 +378,62 @@ connection, so no visitor — or crawler — can wake serverless compute. One
 warehouse query happens when *you* run this script, deliberately.
 
 Aggregates only, never row-level: twelve rows of entity and count.
+
+## Entry point 4 — the Airflow DAG (runs on the laptop, drives Databricks)
+
+**Invoked as:** trigger `medallion` at http://localhost:8080, or
+`docker compose --env-file ../.env exec airflow-scheduler airflow dags trigger medallion`
+from `orchestration/`. Never on a schedule (`schedule=None`).
+**Reads:** the root `.env` (via compose), `MEDALLION_PIPELINE_ID`
+**Writes:** nothing itself — it starts one pipeline update
+
+```
+docker compose --env-file ../.env up -d          (orchestration/)
+└── compose builds AIRFLOW_CONN_DATABRICKS_DEFAULT from DATABRICKS_HOST/TOKEN  (D37)
+    └── scheduler (LocalExecutor, D38) parses dags/medallion.py
+        └── trigger → run_medallion: DatabricksSubmitRunOperator
+            ├── POST /api/2.1/jobs/runs/submit
+            │     tasks=[{task_key: medallion, pipeline_task: {pipeline_id}}]
+            │     └── Databricks starts ONE update of medallion-dev   (cause JOB_TASK)
+            │         └── on failure the pipeline retries itself (RETRY_ON_FAILURE)
+            └── polls runs/get until a terminal state
+                ├── SUCCESS           → task green
+                └── FAILED / INTERNAL → task red   (retries=0: no second round)
+```
+
+Afterwards, by hand: `python -m scripts.publish_snapshot`, commit, push (D36).
+
+## Entry point 5 — the Synthea image (regenerates the dataset)
+
+**Invoked as:** `docker build -t healthcare-synthea:7e08387 synthea/` then
+`docker run --rm -v C:\synthea-test:/data healthcare-synthea:7e08387`
+**Writes:** `/data/synthea/output/{csv,fhir,notes,metadata}` — a scratch mount,
+never `synthea/output/`
+
+```
+docker build
+├── stage 1 (eclipse-temurin:17-jdk)
+│   ├── git fetch --depth 1 origin 7e08387…          ← one commit, not the history
+│   ├── git describe → src/main/resources/version.txt ← else Build-Version: N/A (E29)
+│   └── ./gradlew uberJar → synthea-with-dependencies.jar
+└── stage 2 (eclipse-temurin:21-jre)  jar + synthea.properties only
+docker run
+└── java -Xmx3g -jar synthea.jar -c synthea.properties
+         -p 1000 -s 12345 -cs 12345 -r 20260101 -e 20260808 Massachusetts
+```
+
+Reproduces the dataset's shape, not the exact dataset — D35.
+
+### Cycle 11 — 2026-09-18 · Phase 2b · orchestration and reproducibility
+
+- **Two new entry points** as above; the second is the first entry point that
+  needs Docker.
+- `databricks jobs submit` proved the `runs/submit` + `pipeline_task` route
+  before Airflow existed (D33).
+- `--validate-only` adopted as the SQL check, proven on 2a's real parse bug
+  (D34); the rule is in the README.
+- Airflow 3.3.2 in `orchestration/`, provider `apache-airflow-providers-databricks==7.20.0`.
+  DAG proven green on a good pipeline, **red on a broken one**, green again.
+- Synthea image built and run three times; closest run matches 861 of 1,148
+  patients exactly. Stopped at the time-box with the cause unidentified (D35).
+- Errors E25–E32. Three of them silent (E29, E30, E31).
