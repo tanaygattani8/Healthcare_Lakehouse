@@ -418,11 +418,12 @@ docker build
 │   └── ./gradlew uberJar → synthea-with-dependencies.jar
 └── stage 2 (eclipse-temurin:21-jre)  jar + synthea.properties only
 docker run
-└── java -Xmx3g -jar synthea.jar -c synthea.properties
+└── java -Duser.timezone=America/Chicago -Xmx3g -jar synthea.jar -c synthea.properties
          -p 1000 -s 12345 -cs 12345 -r 20260101 -e 20260808 Massachusetts
 ```
 
-Reproduces the dataset's shape, not the exact dataset — D35.
+Reproduces the recorded dataset to 0.004% (132 rows of 3.28 million, all near
+the cutoff); bytes differ by line endings — D35.
 
 ### Cycle 11 — 2026-09-18 · Phase 2b · orchestration and reproducibility
 
@@ -434,6 +435,7 @@ Reproduces the dataset's shape, not the exact dataset — D35.
   (D34); the rule is in the README.
 - Airflow 3.3.2 in `orchestration/`, provider `apache-airflow-providers-databricks==7.20.0`.
   DAG proven green on a good pipeline, **red on a broken one**, green again.
-- Synthea image built and run three times; closest run matches 861 of 1,148
-  patients exactly. Stopped at the time-box with the cause unidentified (D35).
+- Synthea image built and run five times. Causes found in turn: heap size,
+  end date, timezone. Final run: 1,148 patients, 132 rows of 3.28 million
+  different (D35).
 - Errors E25–E32. Three of them silent (E29, E30, E31).

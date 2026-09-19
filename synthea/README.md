@@ -41,9 +41,12 @@ docker build -t healthcare-synthea:7e08387 synthea/
 docker run --rm -v C:\synthea-test:/data healthcare-synthea:7e08387
 ```
 
-**It reproduces the dataset's shape, not the exact dataset.** Same code, config
-and seeds; 861 of 1,148 patients come out identical, totals ~0.2% off. Cause
-not yet identified — decision.md D35.
+**It reproduces the dataset almost exactly.** Same 1,148 patients; 132 rows of
+3.28 million differ (0.004%), all in the final weeks before the 8 Aug cutoff,
+because the recorded run stopped at 22:18 and `-e` stops at midnight. Byte
+sizes differ because the recorded CSVs have Windows line endings. The image
+runs Java in US Central time, as the recorded laptop did — without that, a
+quarter of patients differ. decision.md D35.
 
 Output lands in `C:\synthea-test\synthea\output\`. Mount a scratch directory,
 never `synthea/output/` — a wrong image would overwrite the only copy of the

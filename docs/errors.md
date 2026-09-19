@@ -816,7 +816,12 @@ at a time is whack-a-mole.
 **Fix: restart Windows.** It releases every stale socket at once; Docker started
 cleanly afterwards. The two folders renamed aside
 (`Docker\run.stale-20260918`, `docker-secrets-engine.stale-20260918`) are
-disposable.
+disposable — but even after the restart Windows still could not delete the
+sockets inside them. `Docker\run.stale-20260918` went away when deleted from a
+Linux container that mounted its parent folder. `docker-secrets-engine.stale-20260918`
+did not: `Remove-Item`, `rmdir /s /q`, a container mount and the `docker-desktop`
+WSL distro all failed or saw an empty folder. Two 0-byte entries remain in
+AppData; harmless, left alone.
 
 **Rule.** Quit Docker Desktop from its tray menu. Never force-kill it.
 
@@ -901,7 +906,18 @@ until now, which is the only reason it went unnoticed.
 
 **Fix.** `-e 20260808` in the image's entrypoint — the recorded run's own date,
 read from its metadata — and the README corrected. Synthea at this commit
-accepts `-e endDate as YYYYMMDD`. A jar that cannot say
+accepts `-e endDate as YYYYMMDD`.
+
+**It was not the whole story.** With `-e`, 861 of 1,148 patients matched.
+Single-threaded generation gave the identical result (threading ruled out). The
+remaining cause was the **timezone**: the recorded run was on a Central-time
+laptop, the container is UTC, and Synthea turns timestamps into dates in the
+JVM's zone. With `-Duser.timezone=America/Chicago`: 1,148 patients, 1,136
+identical, 132 rows of 3.28 million different — all in the final weeks, from
+`-e` stopping at midnight where the recorded run stopped at 22:18. D35.
+
+**The general lesson.** Seeds pin the random numbers. They do not pin the
+clock, the calendar or the timezone, and a simulator reads all three. A jar that cannot say
 which version it is defeats the pin even when the code inside is right.
 
 ---

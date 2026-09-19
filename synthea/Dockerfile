@@ -36,10 +36,14 @@ WORKDIR /data
 # Seeds, reference date and end date are the recorded dev tier. Without -e,
 # Synthea simulates up to the day it runs, so the same seeds give a different
 # dataset every day (errors.md E31). 20260808 is when the recorded run was made.
+# America/Chicago: the recorded run was made on a laptop in US Central time, and
+# Synthea turns timestamps into dates in the JVM's zone. Under the container's
+# default UTC, a quarter of patients came out different (decision.md D35).
 # -Xmx3g: Java defaults to a quarter of the memory it sees, ~1 GB inside Docker
 # Desktop's 4 GB VM. At 1 GB patients die of OutOfMemoryError mid-generation and
 # are silently dropped, with exit code 0 (errors.md E30).
-ENTRYPOINT ["java", "-Xmx3g", "-jar", "/app/synthea.jar", \
+ENTRYPOINT ["java", "-Duser.timezone=America/Chicago", "-Xmx3g", \
+            "-jar", "/app/synthea.jar", \
             "-c", "/app/synthea.properties", \
             "-p", "1000", "-s", "12345", "-cs", "12345", "-r", "20260101", \
             "-e", "20260808", \

@@ -625,7 +625,7 @@ into the README as the step before pushing pipeline SQL.
 
 **What would reverse this.** sqlfluff's dialect learning `CONSTRAINT … EXPECT`.
 
-### D35 — Synthea built from commit `7e08387`; reproduction is partial
+### D35 — Synthea built from commit `7e08387`; reproduces to 0.004%
 
 **Decision.** `synthea/Dockerfile` builds Synthea from commit
 `7e08387c68a7f0e21d13076609a159fd473fc902` and bakes in the recorded seeds,
@@ -664,13 +664,53 @@ not the byte-identical one `calibration.md` measured. The committed
 measurements remain true of the dataset actually in the lakehouse. What cannot
 be claimed is "rerun this and get the same numbers".
 
-**Open decision, not taken here.** Either (a) spend runs on the candidates
-above, cheapest first: one run with `--generate.thread_pool_size=1`
-(single-threaded; the default `-1` uses every core) tests the threading theory
-directly, though the recorded run was multi-threaded too, so a match is not
-guaranteed even if threading is the cause; or (b) accept "same shape" reproducibility and
-say so in the README; or (c) re-baseline phase 1 on a container-generated
-dataset so the image and the measurements agree by construction.
+**Threading ruled out (19 Sep).** A fourth run with
+`--generate.thread_pool_size=1` produced 1,147 patients, 861 identical to the
+recorded run, and **the same row count in every table and the same CSV bytes**
+as the multi-threaded container run. The container is deterministic; it is
+consistently different from the laptop run. The end-time theory is out too:
+the container stops earlier in the day on 8 Aug yet has *more* encounters
+(188,511 against 187,540).
+
+**Timezone was the main cause — confirmed 19 Sep.** The recorded run was made on
+a laptop in US Central time; the container runs UTC, and Synthea converts
+timestamps to dates in the JVM's zone. A fifth run with
+`-Duser.timezone=America/Chicago`:
+
+| | UTC (run 3) | Chicago (run 5) | Recorded |
+|---|---|---|---|
+| Records | 1,147 / 1,000 / 147 | **1,148 / 1,000 / 148** | 1,148 / 1,000 / 148 |
+| Identical patient rows | 861 | **1,136** | — |
+| Total rows | 3,269,605 | **3,277,180** | 3,277,048 |
+| Encounters not reproduced | — | **15 of 187,540** | — |
+
+The 12 non-identical patients are the same people — same name, birth date,
+address — differing only in the running `HEALTHCARE_EXPENSES/COVERAGE` totals.
+
+**What remains, and why it stays.**
+
+1. **End time of day.** Every leftover encounter falls between 7 Jul and 8 Aug
+   2026; 7 are on 8 Aug itself, which the container has none of. The recorded
+   run simulated up to 22:18 on 8 Aug; `-e` accepts only a date and stops at
+   its start. Synthea offers no finer control, so this residue is permanent.
+2. **Line endings.** The recorded CSVs were written on Windows with `\r\n`; the
+   container writes `\n`. Every file is exactly one byte per line smaller —
+   same data, different bytes. This is why `calibration.md`'s byte columns can
+   never match from Linux. (Git Bash's `grep` strips `\r` and reported zero —
+   count raw bytes when checking this.)
+
+The timezone is now baked into the image's entrypoint.
+
+**Verdict.** The image reproduces the recorded dataset to within the final
+weeks before the cutoff: identical patient roster, identical counts for seven of
+twelve tables, 132 rows different out of 3.28 million (0.004%). Not
+byte-identical, and it cannot be from Linux.
+
+**Resolved by option (a).** Three options were on the table after the time-box:
+(a) keep testing causes, (b) accept "same shape", (c) re-baseline phase 1 on
+container output. (a) was chosen: the single-threaded run ruled threading out,
+the timezone run found the cause. No re-baseline is needed; `calibration.md`
+stands.
 
 ### D36 — the snapshot stays a manual step after the DAG
 
