@@ -7,8 +7,23 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 1 complete — bronze landed, calibration measured, readmission
-gate decided.
+**Status:** Phase 2b complete — bronze landed, silver modelled, the pipeline
+triggered from Airflow. Phase 3a (PHI governance) is next.
+
+## What phase 2 produced
+
+| | |
+|---|---:|
+| Silver tables | 12 |
+| Quarantine tables | 9 |
+| Rows quarantined, all tables | 104 |
+| Orchestration | Airflow 3.3.2, five containers, `medallion` DAG |
+
+Every silver table is built as a pair: a typed view carrying a `violations`
+array, then a materialized view keeping only the rows where that array is
+empty. The failing rows are not dropped — they land whole in
+`ops.quarantine_<name>`, which is why the number above is known rather than
+estimated. 104 of 3,277,048 rows failed a rule, all of them medications.
 
 ## What phase 1 produced
 

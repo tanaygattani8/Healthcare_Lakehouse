@@ -55,6 +55,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E30](#e30) | Container run: `Records: total=1138`, `OutOfMemoryError`, exit 0 | 2b-3 |
 | [E31](#e31) | Same seeds, different dataset — `1147`, every table off | 2b-3 |
 | [E32](#e32) | First DAG run: `httpx.ReadTimeout: timed out`, task never started | 2b-5 |
+| [E33](#e33) | CI tab is empty. `actions/runs` returns `"total_count": 0` | 2b-0 |
 
 ---
 
@@ -955,12 +956,61 @@ or in the web UI.
 
 ---
 
+## Phase 2b Task 0 — the PR check gate
+
+### E33 — the CI gate has never run, and nothing said so {#e33}
+
+`.github/workflows/pr.yml` was added in `07f6d90` to stop broken code reaching
+main after E16 and E22. Phase 2b's Task 0 was to confirm it goes green on a
+clean branch and red on a broken one.
+
+Checking for the dates of those two runs, the GitHub API says there are none:
+
+```
+$ curl -s ".../actions/runs?per_page=50"
+{ "total_count": 0, "workflow_runs": [] }
+
+$ curl -s ".../pulls?state=all"
+[]
+```
+
+The workflow itself is registered and `"state": "active"`, created
+2026-09-15T22:45:15Z. It has simply never been triggered.
+
+**Cause: the trigger is `on: pull_request`, and no pull request has ever been
+opened on this repository.** Every commit in the history went straight to
+`main` — including the three that closed phase 2b. The gate cannot fire on a
+push it never sees.
+
+So the state of the gate is unknown in both directions. It has never been seen
+green, so it is not known to work; never seen red, so it is not known to catch
+anything. A workflow file in the repo reads like protection and is currently
+decoration. **This is the same shape as E16**: the check that was supposed to
+prove correctness was itself never verified.
+
+**Not fixed yet.** Two options, and they are not equivalent:
+
+| | |
+|---|---|
+| Open a real PR from a throwaway branch | Tests the gate exactly as it will be used. Costs one Databricks token round-trip in the `bundle` job. |
+| Add `push: branches: [main]` to the trigger | Makes the gate fire on the workflow this project actually uses, but it runs *after* the bad commit has landed — it reports, it does not gate |
+
+The first proves the mechanism. The second matches reality: solo work on
+`main`, with no PR in the loop. Doing only the second means the lint job that
+exists because of E16 reports a failure that is already in history.
+
+Recorded rather than fixed because it is a phase-3a decision, not a phase-2b
+loose end.
+
+---
+
 ## Patterns
 
-**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22, E29, E30, E31.**
-Twelve of thirty-two produced no failure signal at all. Phase 2b added three in
-one task: a jar that could not name its version, a run that dropped ten patients
-and exited 0, and a "reproducible" command that had never been reproducible. Every one of them would have shipped a
+**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22, E29, E30, E31, E33.**
+Thirteen of thirty-three produced no failure signal at all. Phase 2b added four:
+a jar that could not name its version, a run that dropped ten patients
+and exited 0, a "reproducible" command that had never been reproducible, and a
+CI gate that had never run once. Every one of them would have shipped a
 plausible wrong number. The crashes in this file cost minutes; these are the
 ones that would have cost the project its credibility. **A tool that cannot
 fail cannot be trusted when it succeeds** — and E16 shows the rule applies to

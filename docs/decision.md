@@ -760,6 +760,54 @@ default.
 **What would reverse it.** Deferrable operators (bring back the triggerer), or
 more than one machine running tasks (bring back Celery).
 
+### D39 — the PR gate's status is unknown, and that is recorded rather than assumed
+
+**Finding, not a decision.** Phase 2b's Task 0 was to see `.github/workflows/pr.yml`
+go green on a clean branch and red on a broken one, and to write down both dates.
+There are no dates. The workflow has never executed: the GitHub API reports
+`"total_count": 0` for workflow runs and no pull request has ever been opened
+on this repository. Every commit went straight to `main`, and the trigger is
+`on: pull_request`. [E33](errors.md#e33).
+
+**Why this is worth a decision entry.** The file was added specifically because
+[E16](errors.md#e16) and [E22](errors.md#e22) put broken code on `main` twice.
+It has not prevented a third occurrence; it has not had the chance to. Leaving
+the README implying an enforced gate would be the fourth instance of the same
+failure shape this log already names.
+
+**Deferred to phase 3a**, where the choice is between opening one throwaway PR
+to prove the mechanism and adding a `push` trigger to match how this repository
+is actually worked. They solve different problems and the trade-off is written
+out in E33.
+
+### D40 — phase 3 splits into 3a and 3b
+
+**Decision.** The spec's phase 3 ships as two phases. 3a is structural
+governance — Unity Catalog tags, column masks, row filters, clearance table,
+audit view. 3b is the de-identification AI — note chunking, the three detection
+stages, MLflow evaluation, k-anonymity.
+
+**Why.** They share the word PHI and nothing else. 3a is SQL against the
+catalog and costs almost no compute; 3b is quota-bound model work on 1,148
+notes averaging 335 KB. Held together, the finished governance layer waits on
+NER debugging before anything is demonstrable.
+
+**The consequence that shaped 3a.** `silver.patient` is a materialized view
+owned by the Lakeflow pipeline, so `ALTER TABLE … SET MASK` applied from
+outside is **not in the pipeline source and is lost on the next full refresh** —
+silently, with no error. Masks and row filters are therefore declared inside
+`pipelines/medallion/silver/patient.sql`, making the pipeline source the one
+record of what is protected. The mask functions and the clearance table cannot
+live there, because a pipeline cannot `CREATE FUNCTION` and its outputs are
+read-only, so they bootstrap separately and the pipeline fails loudly if that
+bootstrap has not run.
+
+**Unverified on Free Edition, and probed before 3a is planned further:** whether
+a masking UDF may read another table (the whole clearance design rests on it),
+whether column tags survive a pipeline refresh, and whether `system.access.audit`
+exists at all. If the last one does not, the audit view becomes a row in the
+README's degradation table instead of a feature.
+
 ## Task 9 — the public app
 
 ### D25 — the app gets its own `requirements.txt`
