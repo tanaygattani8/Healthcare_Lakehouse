@@ -802,11 +802,126 @@ live there, because a pipeline cannot `CREATE FUNCTION` and its outputs are
 read-only, so they bootstrap separately and the pipeline fails loudly if that
 bootstrap has not run.
 
-**Unverified on Free Edition, and probed before 3a is planned further:** whether
-a masking UDF may read another table (the whole clearance design rests on it),
-whether column tags survive a pipeline refresh, and whether `system.access.audit`
-exists at all. If the last one does not, the audit view becomes a row in the
-README's degradation table instead of a feature.
+### D41 — the governance probe: all five mechanisms work on Free Edition
+
+Three things in D40 were assumed. `sql/probe_governance.sql` tested them before
+any of 3a was built. **All five passed**, and two of them were expected to fail.
+
+| Probe | Result |
+|---|---|
+| P1 — create a masking function | Works |
+| P2 — a masking function that reads a table | **Works.** Predicted to be the coin-flip |
+| P3 — attach the mask, and see it flip | Works. `Lucius Emard` with a clearance row, `***` after deleting it |
+| P4 — column tags | Works. `information_schema.column_tags` returns the tag |
+| P5 — `system.access.audit` | **Exists and is populated.** Predicted to be absent |
+
+P2 passing is what matters most: the spec's clearance-table design survives, so
+the mask can be demonstrated opening and closing on a one-account workspace
+without depending on UC groups. P5 passing means the audit view stays in scope
+rather than becoming a degradation-table row.
+
+**Two questions the probe did not answer, and must not be assumed from it:**
+
+- **P4 ran against a plain Delta table, not a pipeline-owned materialized
+  view.** Whether a column tag survives a full refresh of `silver.patient` is
+  still unknown, and it is the whole reason tags cannot live in the pipeline
+  source. Test it by full-refreshing and re-querying `column_tags`.
+- **The single P5 row is a system event** — `workspace_id: 0`,
+  `user_identity.email: System-User`, `service_name: unityCatalog`. It proves
+  the table exists and fills; it does not prove a human `SELECT` against a
+  PHI-tagged column is captured with an attributable identity. `system.query`
+  also exists and may be the better source for the audit view.
+
+Predicting two of five wrongly is the argument for having run the probe at all:
+3a would otherwise have been planned around a clearance design believed fragile
+and an audit view believed impossible.
+
+### D42 — ABAC exists here, and it may remove D40's central constraint
+
+`sql/probe_tag_mask_link.sql` answered three more questions.
+
+**P7 — an applied mask is visible as metadata.**
+`information_schema.column_masks` returns
+`probe_link / ssn / healthcare_dev.ops.probe_hide`.
+
+**P8 — the tag-versus-mask drift check works, and was tested in both
+directions.** The probe tags two columns `phi_category` and masks only one. The
+check returns `city` and not `ssn` — so it catches an unmasked PHI column, and
+does not cry wolf on a masked one. A check only ever seen passing is [E33](errors.md#e33)
+again; this one has been seen failing on purpose.
+
+**P9 — `information_schema.abac_policy_definitions` exists.** Its columns say
+what a policy is: `policy_type` takes `COLUMN_MASK` and `ROW_FILTER`,
+`on_securable_type` takes `CATALOG`, `SCHEMA` or `TABLE`, and there are
+`match_columns` and `when_condition`.
+
+**Why that matters more than it looks.** D40's central problem is that a mask
+attached to `silver.patient` is lost when the pipeline recreates the view, which
+is why masks were to be written into the pipeline source. A policy attached to
+the **schema**, matching columns by condition, is not attached to the view at
+all — so a full refresh cannot drop it. If that works, masks come out of
+`patient.sql` entirely and one policy per Safe Harbor category replaces a MASK
+clause on every column.
+
+**It also inverts which artefact is load-bearing.** Under ABAC the tag stops
+being a label and becomes the thing the policy matches on. A tag lost in a full
+refresh would then silently unmask the column — a worse failure than today's,
+and the reason P8's drift check moves from nice-to-have to required.
+
+**Still unproven, and not to be assumed from a table's column list:** that
+`CREATE POLICY` is permitted on Free Edition, and that it can match columns by
+tag rather than by name. The next probe creates one. D40 stands until it does.
+
+### D43 — masks are ABAC policies on the schema, not MASK clauses on columns
+
+**This replaces D40's approach.** `sql/probe_abac.sql` created a working
+tag-driven column mask on Free Edition.
+
+**The first attempt failed**, and the error is the useful part:
+
+```
+UC_INVALID_POLICY_CONDITION … Unknown tag policy key `phi_category`
+```
+
+**ABAC matches governed tags, not the free-form kind.** A governed tag is an
+account-level key with a declared value list, registered with
+`CREATE GOVERNED TAG phi_category VALUES ('name','ssn','date','geography','contact')`.
+`ALTER … SET TAGS` will happily write any key it is handed; only a registered
+one can be matched by a policy. Two kinds of tag, one word — [errors.md](errors.md)
+Pattern 4 again.
+
+**What works, measured:**
+
+| Probe | Result |
+|---|---|
+| P10 `CREATE GOVERNED TAG` | Permitted on this account |
+| P11 policy matching the tag **key**, `has_tag('phi_category')` | Registered as `COLUMN_MASK` on `SCHEMA`; both tagged columns returned `***` |
+| P12 policy matching the tag **value**, `has_tag_value('phi_category','ssn')` | `ssn` → `***`, `city` → `Boston` |
+
+P12 is the one that decides the shape of the work: **one policy per Safe Harbor
+category**, each pointing at the mask function for that category, rather than a
+`MASK` clause on each of twenty columns.
+
+**Why this outranks D40's design.** The policy is attached to the *schema*. It
+is not part of `silver.patient`, so the pipeline cannot drop it when it
+recreates the view — which was D40's entire reason for pushing masks into the
+pipeline source. `pipelines/medallion/silver/patient.sql` stays untouched by
+governance, and the Databricks docs state column mask policies apply to
+materialized views and streaming tables.
+
+**The risk moves rather than disappearing.** The tag is now the load-bearing
+part: lose it and the policy stops matching and the column silently unmasks.
+Under D40 a lost `MASK` clause would at least show in a diff of the pipeline
+source. So the P8 drift check is not optional, and it should compare against
+governed-tag assignments.
+
+**Tested as far as it can be cheaply.** Tags survive `CREATE OR REPLACE TABLE`
+and the mask still applies afterwards. **That is a proxy, not the real thing** —
+a Lakeflow full refresh of a materialized view is not a `CREATE OR REPLACE
+TABLE`, and the difference is exactly where a silent unmasking would hide. The
+authoritative test is a full refresh of one small table with
+`--full-refresh-selection`, and it costs a serverless wake-up against the daily
+quota, so it is a deliberate step rather than something to slip into a probe.
 
 ## Task 9 — the public app
 
