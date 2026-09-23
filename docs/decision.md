@@ -923,6 +923,106 @@ authoritative test is a full refresh of one small table with
 `--full-refresh-selection`, and it costs a serverless wake-up against the daily
 quota, so it is a deliberate step rather than something to slip into a probe.
 
+**D42's drift check was superseded before it was ever used.** It joined
+`column_tags` to `information_schema.column_masks`, which is correct only for
+`ALTER COLUMN … SET MASK`. Under D43's ABAC design `column_masks` stays empty,
+so that check would report all 19 protected columns as unprotected, for ever.
+It was verified in both directions — against a design abandoned one decision
+later, and the verification was not repeated. [E37](errors.md#e37).
+
+### D44 — phase 3a as built
+
+| | |
+|---|---|
+| Governed tag | `phi_category`, 8 values |
+| Mask functions | `mask_text`, `mask_zip`, `mask_date`, `mask_point`, all gated by `is_cleared()` |
+| Tagged columns | 19 on `silver.patient`, 19 on `ops.quarantine_patient` |
+| Column mask policies | 4 per schema, 8 total |
+| Row filter policy | 1, on `silver` |
+| Audit view | `ops.phi_access_audit` |
+
+**Four mask policies, not eight.** `MATCH COLUMNS` accepts a disjunction, so
+the five tag values sharing `mask_text` — `name`, `geography`, `ssn`,
+`license`, `other_id` — collapse into one policy. `zip`, `date` and `geo_point`
+need their own because each names a different mask function.
+
+**The vocabulary splits on type as well as category.** A mask returns the
+column's own type, so `latitude`/`longitude` (DOUBLE) cannot share the STRING
+mask the other geography columns use — hence `geo_point`. And `ZIP` truncates
+where `ADDRESS` redacts, so it cannot share `geography` either. Both splits are
+mechanical consequences of the platform, not of HIPAA.
+
+**Two columns are deliberately untagged.** `STATE`, because Safe Harbor permits
+state and the row filter keys off it. `patient_id`, because masking a join key
+breaks every downstream join — Safe Harbor does cover it, and a surrogate key
+in the `deid` branch is 3b's answer.
+
+**Verified, not assumed:**
+
+- Masks flip both ways on the real table — `999-27-2324` → `***`,
+  `01730` → `017`, `2022-11-30` → `2022-01-01`, coordinates → `NULL`
+- **Tags survive a Lakeflow full refresh.** `--full-refresh-selection
+  silver.patient` completed, the census still read 19/19, masking still worked.
+  That was the design's last open risk
+- The drift check was proven failing, by dropping `mask_phi_zip` and watching
+  `zip` appear, then restored
+
+### D45 — the row filter demonstrates a mechanism, not a policy
+
+`filter_patient_state` restricts rows by `STATE` against `ops.phi_clearance`.
+Verified: scope `*` → 1,148 rows, scope `Rhode Island` → 0, scope
+`Massachusetts` → 1,148.
+
+**Every patient in this dataset is in Massachusetts**, so this filter can only
+ever be all-or-nothing. It is included because it proves the mechanism and
+because a second state would make it real with no code change — not because it
+is doing segregation work. Said plainly here rather than left to imply more.
+
+It uses a second governed tag, `row_scope`, rather than `phi_category`. STATE
+is not an identifier under Safe Harbor, and tagging it `phi_category` would
+have masked it and put it under the wrong policy. The tag says what a column is
+*for*, not what kind of identifier it is.
+
+### D46 — the audit view reads query history, not the access log
+
+`ops.phi_access_audit` is built on `system.query.history`. Both it and
+`system.access.audit` exist here, and access.audit has 19,462 user-attributed
+rows — but they record catalog operations like `getTableById`, which answers
+"was this object resolved", not "did a person read this data". query.history
+carries the statement text and who ran it.
+
+Its PHI table list is derived from `column_tags` rather than hardcoded, so
+tagging a new table adds it to the audit with no second place to update.
+
+**It matches on statement text, which is an upper bound and not a census.** A
+read through another view is missed, and `patient` is a substring of
+`quarantine_patient` so one read matches both. The precise alternative is
+`access.audit.request_params`, which is far less legible. Stated here so no
+number from this view is ever quoted as exact.
+
+### D47 — the clearance table is the ceiling, and it is not access control
+
+Nothing prevents `INSERT INTO ops.phi_clearance VALUES (current_user(), 'full')`.
+Any reader who can query the masked data can clear themselves.
+
+On a one-account workspace there is nobody to defend against, and UC groups are
+the production answer the spec already names. But **"this project implements
+column masks" implies more than is delivered**, so the gap is recorded rather
+than left for a reader to discover. The production fix is `REVOKE MODIFY` on
+`ops.phi_clearance` from everyone except an admin group.
+
+**Two hazards that fail silently, both from `TO account users` covering the
+identity the pipeline runs as:**
+
+- Gold is built from *identified* silver on purpose, because readmission
+  windows need true dates. Build gold with no clearance row and every gold
+  table fills with `***` and `2022-01-01`, with no error anywhere.
+- Worse, the row filter: build gold with the wrong `scope_state` and gold comes
+  out **empty**, also with no error.
+
+`sql/governance_check.sql` catches neither. It compares tags to policies, not
+clearance to intent. Check `ops.phi_clearance` before any gold build.
+
 ## Task 9 — the public app
 
 ### D25 — the app gets its own `requirements.txt`

@@ -14,12 +14,26 @@ def _is_comment(statement: str) -> bool:
 
 
 def _statements(text: str) -> list[str]:
-    # ponytail: naive split on ';'. Fine for DDL. Breaks on semicolons inside
-    # string literals or comments — switch to sqlglot if that day ever comes.
-    chunks = (s.strip() for s in text.split(";"))
+    # Split on ';', but only where it is actually code. A plain text.split(';')
+    # cuts prose in half the first time a comment contains a semicolon, and
+    # sends the second half to the warehouse as SQL.
+    # ponytail: one terminator per line, and ';' inside a string literal still
+    # splits. Both are true of every file here; reach for sqlglot if that ends.
+    chunks: list[str] = []
+    buffer: list[str] = []
+    for line in text.splitlines():
+        code = line.split("--", 1)[0]
+        if ";" in code:
+            end = line.index(";", 0, len(code))
+            buffer.append(line[:end])
+            chunks.append("\n".join(buffer))
+            buffer = [line[end + 1 :]]
+        else:
+            buffer.append(line)
+    chunks.append("\n".join(buffer))
     # A file ending in a comment leaves a trailing comment-only chunk, which
     # the warehouse rejects as a parse error after every statement succeeded.
-    return [s for s in chunks if s and not _is_comment(s)]
+    return [s.strip() for s in chunks if s.strip() and not _is_comment(s)]
 
 
 def run_file(path: Path) -> None:

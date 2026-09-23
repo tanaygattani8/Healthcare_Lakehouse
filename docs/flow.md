@@ -439,3 +439,61 @@ the cutoff); bytes differ by line endings — D35.
   end date, timezone. Final run: 1,148 patients, 132 rows of 3.28 million
   different (D35).
 - Errors E25–E32. Three of them silent (E29, E30, E31).
+
+---
+
+## Entry point 6 — the governance SQL (runs against Unity Catalog)
+
+Six files in `sql/`, each run with
+`.venv/Scripts/python.exe -m scripts.run_sql sql/<file>`. Order matters: a
+policy cannot compile before the tag it matches exists, and a tagged column
+without a policy is an unprotected PHI column.
+
+```
+governed_tag_fix.sql      CREATE GOVERNED TAG phi_category, 8 values
+        │                 account-level; ABAC matches only governed tags (E35)
+        ▼
+governance_bootstrap.sql  ops.phi_clearance, is_cleared(),
+        │                 mask_text / mask_zip / mask_date / mask_point
+        ▼
+governance_tags.sql       19 columns on silver.patient
+        │                 STATE and patient_id deliberately excluded (D44)
+        ▼
+governance_policies.sql   4 COLUMN MASK policies ON SCHEMA silver
+        │                 attached to the schema, not the view, so a full
+        │                 refresh cannot drop them (D43)
+        ▼
+governance_quarantine.sql same 19 tags + same 4 policies on ops
+        │                 quarantine holds whole failed rows, PHI included
+        ▼
+governance_row_filter.sql row_scope tag, filter_state(), 1 ROW FILTER policy
+                          registering the tag and creating the policy in one
+                          run fails the first time (E36)
+```
+
+Then, independently:
+
+- `governance_check.sql` — the drift check. Run **after every pipeline full
+  refresh**. Check 1 returns nothing when correct; check 2 must read 19 and 19.
+- `governance_verify.sql` — flips the clearance row and shows the masks
+  opening and closing. Leaves clearance restored.
+- `governance_audit.sql` — creates `ops.phi_access_audit` over
+  `system.query.history`.
+
+**Before any gold build, read `ops.phi_clearance`.** The policies apply to the
+identity the pipeline runs as: no clearance row fills gold with `***`, and a
+wrong `scope_state` makes gold empty. Neither raises an error (D47).
+
+### Cycle 12 — 2026-09-23 · Phase 3a · structural PHI governance
+
+- **Probes first.** Five mechanisms tested before any were planned around; two
+  of three predictions were wrong (D41). ABAC found only by reading
+  `information_schema` (D42), which replaced the whole design (D43).
+- Masks are **schema policies matching governed tags**, not MASK clauses on
+  columns. `patient.sql` is untouched by governance.
+- Nineteen columns tagged in each of two schemas, nine policies, one audit view.
+- **The full refresh was survived**: tags intact, masking intact — the design's
+  last open risk.
+- Errors E34–E38. Two of them silent, both in the governance layer itself: a
+  drift check that would have passed for ever (E37) and a function the file and
+  the catalog disagreed about (E38).

@@ -7,8 +7,34 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 2b complete — bronze landed, silver modelled, the pipeline
-triggered from Airflow. Phase 3a (PHI governance) is next.
+**Status:** Phase 3a complete — bronze landed, silver modelled, the pipeline
+triggered from Airflow, PHI columns classified and masked. Phase 3b (the
+de-identification AI) is next.
+
+## What phase 3a produced
+
+| | |
+|---|---:|
+| PHI columns classified | 19, in each of two schemas |
+| Column mask policies | 8 |
+| Row filter policies | 1 |
+| Safe Harbor categories | 8 |
+
+Masks are **ABAC policies attached to the schema**, matching governed tags —
+not `MASK` clauses on columns. A column mask attached to `silver.patient`
+would be lost the next time the pipeline recreated it, silently, which is the
+worst possible failure for a security control. A schema policy is not part of
+the table definition. Verified by full-refreshing `silver.patient` and
+confirming the tags and the masking both survived.
+
+Clearance is a row in `ops.phi_clearance`, so the mask can be shown opening and
+closing on demand: `999-27-2324` → `***`, `01730` → `017`, `2022-11-30` →
+`2022-01-01`. Safe Harbor permits the year and nothing finer, so the `01-01`
+is fabricated and the column comment says so.
+
+`sql/governance_check.sql` is the drift check: tags are what the policies match
+on, so a lost tag silently unmasks a column. **Run it after every full
+refresh.**
 
 ## What phase 2 produced
 
@@ -123,6 +149,8 @@ there is none.
 | One active pipeline per type | A pipeline per medallion layer | One pipeline containing all layers |
 | Quota shuts down compute daily | Autoscaling production clusters | Dev tier of ~1,000 patients; large runs are manual and deliberate |
 | Databricks Apps for internal hosting | An App behind workspace SSO | Streamlit Community Cloud — Apps sit behind workspace auth and stop after 24h |
+| One account, so no group to grant to | UC groups decide who reads PHI | A row in `ops.phi_clearance`. **Anyone who can read the data can also clear themselves** — the table has no ACL. `REVOKE MODIFY` and UC groups are the fix |
+| One state in the dataset | Row filters segregate by region | The filter works and is verified, but with every patient in Massachusetts it can only be all-rows or no-rows |
 
 ## Scope rule
 

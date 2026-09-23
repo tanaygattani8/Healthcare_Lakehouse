@@ -56,6 +56,11 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E31](#e31) | Same seeds, different dataset — `1147`, every table off | 2b-3 |
 | [E32](#e32) | First DAG run: `httpx.ReadTimeout: timed out`, task never started | 2b-5 |
 | [E33](#e33) | CI tab is empty. `actions/runs` returns `"total_count": 0` | 2b-0 |
+| [E34](#e34) | `PARSE_SYNTAX_ERROR at or near 'after'` — half an English sentence | 3a |
+| [E35](#e35) | `UC_INVALID_POLICY_CONDITION … Unknown tag policy key` | 3a |
+| [E36](#e36) | Same error, seconds after creating that exact governed tag | 3a |
+| [E37](#e37) | `column_masks` empty although masking demonstrably works | 3a |
+| [E38](#e38) | A renamed function exists under both names | 3a |
 
 ---
 
@@ -1004,13 +1009,122 @@ loose end.
 
 ---
 
+## Phase 3a — PHI governance
+
+### E34 — half an English sentence arrives at the warehouse as SQL {#e34}
+
+```
+[PARSE_SYNTAX_ERROR] Syntax error at or near 'after'
+== SQL ==
+after tagging it would orphan them.
+```
+
+`run_sql.py` split statements with `text.split(";")`. The file's header comment
+read *"Safe to run now because no column carries this tag yet; after tagging it
+would orphan them."* The semicolon inside that sentence was treated as a
+statement terminator. The first fragment was comment-only and filtered out; the
+second had no `--` prefix, so it looked like SQL.
+
+**The `ALTER` had already succeeded.** The script still exited non-zero, so the
+run looked like a failure when the work was done — the inverse of
+[E14](#e14), and just as misleading.
+
+**Fix:** `_statements` now treats `;` as a terminator only where it appears
+before any `--` on that line. Three tests in `tests/test_run_sql.py`. The code
+comment had warned about exactly this case since phase 1 and it was still
+written into a file the same day it was read.
+
+---
+
+### E35 — `Unknown tag policy key` on a tag that plainly exists {#e35}
+
+```
+INVALID_PARAMETER_VALUE.UC_INVALID_POLICY_CONDITION
+Invalid condition in policy 'probe_ssn_mask'.
+Compilation error with message 'Unknown tag policy key `phi_category`'
+```
+
+`ALTER … SET TAGS ('phi_category' = 'ssn')` had succeeded and
+`information_schema.column_tags` showed the row.
+
+**Cause: two different things are called tags.** `SET TAGS` writes a free-form
+key-value pair and accepts any key. ABAC policies match only **governed tags** —
+account-level keys registered with `CREATE GOVERNED TAG`, carrying a declared
+value list. A free-form tag is invisible to `has_tag_value`.
+
+**Fix:** register the key first. Pattern 4 in this file, fourth instance.
+
+---
+
+### E36 — the same error, immediately after creating that governed tag {#e36}
+
+`governance_row_filter.sql` runs `CREATE GOVERNED TAG row_scope`, tags a column
+with it, then creates a policy matching it. The policy failed with E35's
+message naming `row_scope` — in the same script, seconds later. Re-running the
+policy statement alone succeeded, unchanged, with nothing else altered.
+
+**Cause: a new governed tag is not immediately visible to the policy compiler.**
+Governed tags are account-level and the policy compiles against a separate
+view of them.
+
+**Consequence for any bootstrap file:** registering a governed tag and creating
+a policy that matches it cannot be one script. Split them, or accept that the
+first run of a combined file always fails at the policy and must be re-run.
+
+---
+
+### E37 — `column_masks` is empty while masking demonstrably works {#e37}
+
+`SELECT count(*) FROM information_schema.column_masks` returned 0, with four
+column mask policies live and `SSN` visibly returning `***`.
+
+**Not a bug — the wrong catalog.** `column_masks` records masks attached with
+`ALTER COLUMN … SET MASK`. A mask applied by an ABAC policy is recorded in
+`abac_policy_definitions` and nowhere else.
+
+**Why it mattered.** The tag-versus-mask drift check validated in
+[decision.md](decision.md) D42 joined `column_tags` to `column_masks`. Under the
+ABAC design adopted one decision later, that check reports **all 19 tagged
+columns as unprotected, permanently**. It was verified failing-on-purpose and
+passing — against a design that was then replaced, and the verification was not
+re-run.
+
+**A check that always fails is worse than no check**, because it trains its
+reader to ignore it. Rewritten against `abac_policy_definitions`, and re-proven
+in both directions by dropping `mask_phi_zip` and watching `zip` appear.
+
+---
+
+### E38 — a renamed function exists under both names {#e38}
+
+`mask_name` was renamed to `mask_text` in `governance_bootstrap.sql`. The file
+said `mask_text`. `information_schema.routines` said `mask_name`.
+
+**Cause: the edited file was never re-run**, and `CREATE OR REPLACE FUNCTION`
+does not rename — re-running would have produced *both*, leaving the old one
+behind for any policy still pointing at it.
+
+**Nothing reports this.** The file and the catalog are separate states with no
+reconciliation between them. The drift check (E37) compares tags against
+policies, not files against catalog. Caught only because
+`routines` was queried for an unrelated reason.
+
+**Fix:** re-run the file, then `DROP FUNCTION` the orphan. The general problem
+stands: **for governance, the SQL file is not the source of truth, the catalog
+is** — and only the catalog was ever tested.
+
+---
+
 ## Patterns
 
-**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22, E29, E30, E31, E33.**
-Thirteen of thirty-three produced no failure signal at all. Phase 2b added four:
+**1. Silent wrongness is the real enemy — E3, E6, E7, E8, E14, E15, E16, E20, E22, E29, E30, E31, E33, E37, E38.**
+Fifteen of thirty-eight produced no failure signal at all. Phase 2b added four:
 a jar that could not name its version, a run that dropped ten patients
 and exited 0, a "reproducible" command that had never been reproducible, and a
-CI gate that had never run once. Every one of them would have shipped a
+CI gate that had never run once. Phase 3a added two more, both in the
+governance layer itself — a drift check that would have reported every
+protected column as unprotected forever, and a function the file and the
+catalog disagreed about. Every one of them would have shipped a
 plausible wrong number. The crashes in this file cost minutes; these are the
 ones that would have cost the project its credibility. **A tool that cannot
 fail cannot be trusted when it succeeds** — and E16 shows the rule applies to
