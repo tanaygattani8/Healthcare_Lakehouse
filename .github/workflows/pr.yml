@@ -2,8 +2,19 @@ name: PR checks
 
 # Twice, broken code reached main because a check that would have caught it was
 # never run (errors.md E16, E22). This removes the option of forgetting.
+#
+# It did not. From 2026-09-15 to 2026-09-23 this workflow never executed once:
+# the trigger was pull_request only, and every commit in this repository's
+# history went straight to main. Zero runs, zero pull requests (errors.md E33).
+#
+# The push trigger is the honest fix for how this repository is actually
+# worked — solo, on main, with no PR in the loop. It reports AFTER the commit
+# has landed, so it is a smoke alarm and not a gate. The pull_request trigger
+# stays for the day a branch is used.
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 

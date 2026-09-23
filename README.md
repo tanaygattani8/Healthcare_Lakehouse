@@ -149,7 +149,7 @@ there is none.
 | One active pipeline per type | A pipeline per medallion layer | One pipeline containing all layers |
 | Quota shuts down compute daily | Autoscaling production clusters | Dev tier of ~1,000 patients; large runs are manual and deliberate |
 | Databricks Apps for internal hosting | An App behind workspace SSO | Streamlit Community Cloud — Apps sit behind workspace auth and stop after 24h |
-| One account, so no group to grant to | UC groups decide who reads PHI | A row in `ops.phi_clearance`. **Anyone who can read the data can also clear themselves** — the table has no ACL. `REVOKE MODIFY` and UC groups are the fix |
+| One account, which owns every object | A service principal owns `ops`; analysts get `SELECT` on `silver` and nothing on `ops` | A row in `ops.phi_clearance`. **Separation of duties is impossible here, not merely weak** — there is one principal and it owns everything, so the masks demonstrate a mechanism and enforce nothing against their owner. A second principal is the fix; `REVOKE` is not |
 | One state in the dataset | Row filters segregate by region | The filter works and is verified, but with every patient in Massachusetts it can only be all-rows or no-rows |
 
 ## Scope rule

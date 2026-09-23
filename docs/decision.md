@@ -1121,3 +1121,79 @@ fetch the old content for a while. A history purge reduces exposure; it is not
 a revocation. **Nothing sensitive was in these files** — that was verified
 before removal, and it is the only reason this was a tidiness decision rather
 than an incident.
+
+### D48 — phase 3b's probes: the platform is there, the offsets are not
+
+`sql/probe_3b.sql`, run before any of 3b was planned in detail.
+
+| Probe | Result |
+|---|---|
+| P1 `ai_query` on a Foundation Model endpoint | **Works.** `databricks-meta-llama-3-3-70b-instruct` returned `OK` |
+| P2 `system.serving` | Exists. `served_entities` is empty — it tracks customer-created endpoints, not the pay-per-token foundation models |
+| P3 `system.mlflow` | `experiments_latest`, `runs_latest`, `run_metrics_history` all present |
+| P4 auto-applied `class.*` tags | **Zero.** Nothing classifies columns automatically here |
+
+**P1 passing means stage 3 exists.** The spec assumed in-platform APIs because
+outbound internet is restricted; they are genuinely available.
+
+P4 confirms 3a's decision to hand-tag nineteen columns was not wasted work —
+there was no scanner to lean on.
+
+**The finding that shapes stage 3.** Asked to return PHI as JSON with character
+offsets, on a real 700-character note chunk, the model got every *category*
+right and most *offsets* wrong:
+
+| Returned | Claimed offset | Actual | |
+|---|---:|---:|---|
+| `2017-10-13` | 5 | 1 | off by +4 |
+| `Aaron` | 76 | 76 | correct |
+| `62` | 94 | 87 | off by +7 |
+
+One in three. `chunk[5:15]` is `'-10-13\n\n# '` — a span that would redact the
+wrong characters and leave part of the date in place.
+
+**So stage 3 must never trust the model's offsets.** It takes the returned
+*text*, which was correct in all three cases, and resolves it back to an offset
+by searching the chunk. That brings its own problem to solve rather than
+discover later: when the returned text occurs more than once in a chunk, which
+occurrence was meant. Counting how often that ambiguity arises is part of
+stage 3's result, not a footnote to it.
+
+**P5 is not answered.** Whether `transformers` installs on serverless and a
+clinical NER model runs on CPU in usable time cannot be tested from SQL. It
+needs a notebook, and it decides whether stage 2 runs on all 1,148 notes or
+only the held-out sample.
+
+### D49 — correction to D47: the clearance table cannot be secured here at all
+
+D47 said the clearance table "has no ACL" and that "any reader who can query
+the masked data can clear themselves", with `REVOKE MODIFY` named as the fix.
+Both halves are wrong, and checking rather than asserting is what showed it.
+
+```
+SHOW GRANTS ON TABLE healthcare_dev.ops.phi_clearance   -- no rows
+SHOW GRANTS ON SCHEMA healthcare_dev.ops                -- no rows
+Owner: tanaygattani8@gmail.com
+```
+
+**There are no grants because there is nobody to grant to.** This workspace has
+exactly one principal, and that principal owns every object in it. No other
+reader exists who could clear themselves, so the hole D47 describes has no
+population to exploit it — and `REVOKE MODIFY` would be a no-op, because
+nothing is granted and an owner cannot be revoked from their own table.
+
+**The accurate statement is stronger and less flattering.** Separation of
+duties is not weakly implemented here; it is **impossible** here. The clearance
+table demonstrates a mechanism working in both directions, which is worth
+having. It enforces nothing against the only account that exists.
+
+**The production fix is not a REVOKE.** It is a second principal: a service
+principal or group that owns `ops`, with the analyst identity granted `SELECT`
+on `silver` and nothing on `ops`. That cannot be built on Free Edition, so it
+is recorded rather than implemented, and the README's degradation table carries
+it.
+
+**Why this correction matters more than the original entry.** D47 described a
+lock with a weak key. The truth is that the door frame has no wall around it.
+Those read very differently to anyone judging whether this project's governance
+is real, and the second one is what is actually true.
