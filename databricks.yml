@@ -19,6 +19,8 @@ resources:
         - file:
             path: pipelines/medallion/bronze/bronze.py
         - file:
+            path: pipelines/medallion/bronze/notes.py
+        - file:
             path: pipelines/medallion/silver/dim_code.sql
         - file:
             path: pipelines/medallion/silver/encounter_class_map.sql

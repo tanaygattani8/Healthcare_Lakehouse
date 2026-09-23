@@ -1197,3 +1197,57 @@ it.
 lock with a weak key. The truth is that the door frame has no wall around it.
 Those read very differently to anyone judging whether this project's governance
 is real, and the second one is what is actually true.
+
+### D50 — what is actually in the notes, and it is not what the spec assumed
+
+Step 3 was run on ten patients before landing anything, and reading the output
+changed the phase. Spec §4.3 says the notes contain "the generated patient's
+real name, address, dates and identifiers". Measured, on one 122,204-character
+note:
+
+| Detail | Times it appears |
+|---|---:|
+| First name (`Lucius`) | 89 |
+| Dates | 89 |
+| `NN year-old` | 83 |
+| **Surname** (`Emard`) | **0** |
+| **City** (`Lowell`) | **0** |
+| **Address** | **0** |
+| **ZIP** | **0** |
+| **SSN** | **0** |
+| **Licence** | **0** |
+
+**Synthea's notes carry a first name and dates. Nothing else.** Six of the
+eight categories 3a built masks for never occur in free text at all.
+
+**What that does to the phase.** The comparison narrows to one real question:
+*can a detector find first names it was never given?* Dates are trivially
+matched by a pattern, so the regex program will score near the top on them and
+zero on names — and that contrast is the finding, not a disappointment. The
+spec's per-category scoreboard across eight categories becomes two.
+
+**Two bugs found in the same sitting, both of which would have been invisible
+in the final numbers:**
+
+**1. The answer sheet was missing 98% of the dates.** Built from
+`silver.patient` alone it found one date per note — the birth date — while the
+note holds 89. Every detector would then have been punished for correctly
+finding 88 real dates. Fixed by adding `silver.encounter`; dates went from 10
+to 1,351 across ten patients.
+
+**2. The dates were off by one day.** The note says `1973-09-03`; the encounter
+table says `1973-09-04`. Synthea wrote the notes in local time, but the CSV
+stores UTC with a `Z`, so an evening appointment in Chicago is the next day in
+UTC. Fixed with `from_utc_timestamp(started_at, 'America/Chicago')` — the same
+timezone pinned in `synthea/Dockerfile` (D35).
+
+The second is the nastier one. It cost 11% of dates overall but **94% for one
+patient**, because Synthea gives each patient a consistent appointment hour, so
+the error clusters by patient instead of averaging out. A spot check of one
+well-behaved patient would have shown 88 of 89 and looked fine.
+
+Date coverage after both fixes: **1,567 of 1,567 date-shaped strings, 100%**.
+
+**Why this justifies doing step 3 before step 1.** None of it needed the notes
+uploaded. Had it been found later, the answer sheet, every detector's score and
+the MLflow history would all have been rebuilt — after spending 370 MB of quota.

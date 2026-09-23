@@ -28,3 +28,7 @@ orchestration/.env
 orchestration/logs/
 orchestration/config/
 orchestration/plugins/
+
+# The answer key. Holds every patient's real name and every real date, with
+# the exact position of each in their note. Never commit it.
+data/
