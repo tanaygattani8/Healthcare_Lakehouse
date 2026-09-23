@@ -1004,8 +1004,25 @@ The first proves the mechanism. The second matches reality: solo work on
 `main`, with no PR in the loop. Doing only the second means the lint job that
 exists because of E16 reports a failure that is already in history.
 
-Recorded rather than fixed because it is a phase-3a decision, not a phase-2b
-loose end.
+**Resolved 2026-09-23.** Both options taken, because they answer different
+questions.
+
+`push: branches: [main]` added to the trigger. **Run #1 of this workflow's
+existence** fired on the next push and finished `success` at 21:29:44Z, lint
+and bundle both green — which also proved the `DATABRICKS_HOST` and
+`DATABRICKS_TOKEN` secrets are present and valid, itself never previously
+tested. The gate is now known to work.
+
+It is still a smoke alarm rather than a gate: on a push trigger it reports
+after the commit has landed. That is honest for how this repository is worked —
+solo, on main — and the `pull_request` trigger remains for the day a branch is
+used.
+
+**Seen red is still outstanding.** A gate seen only green is not known to catch
+anything, which is the whole lesson of E16. Branch `ci/prove-red` carries
+`scripts/_ci_red_probe.py` with three deliberate ruff violations. Open a pull
+request from it, watch the lint job fail, record the date here, then close the
+PR and delete both the branch and the file.
 
 ---
 
