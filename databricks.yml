@@ -32,6 +32,8 @@ resources:
             path: pipelines/medallion/silver/condition.sql
         - file:
             path: pipelines/medallion/silver/facts.sql
+        - file:
+            path: pipelines/medallion/silver/note_chunk.sql
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual
