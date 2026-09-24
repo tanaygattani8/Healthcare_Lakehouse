@@ -61,6 +61,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E36](#e36) | Same error, seconds after creating that exact governed tag | 3a |
 | [E37](#e37) | `column_masks` empty although masking demonstrably works | 3a |
 | [E38](#e38) | A renamed function exists under both names | 3a |
+| [E39](#e39) | `PARSE_SYNTAX_ERROR at or near '"'` on a valid CREATE TABLE | 3b |
 
 ---
 
@@ -1166,3 +1167,32 @@ called "databricks"; venv layouts that differ by platform; `cloudFile` versus
 `cloudFiles`. The fix is always the
 same: find out which one you actually have before theorising about why it is
 broken.
+
+### E39 — half a CREATE TABLE reaches the warehouse, twice {#e39}
+
+```
+[PARSE_SYNTAX_ERROR] Syntax error at or near '"'. SQLSTATE: 42601 (line 27, pos 8)
+```
+
+Line 27 was `COMMENT "The 25 patients … existed; cut from 200 to 25 …"`.
+
+**Same cause as [E34](#e34), in the place E34's fix did not reach.** A
+semicolon inside English prose was read as a statement terminator, so the
+statement was cut in half and the warehouse got an unterminated string.
+
+E34 taught `_statements` to ignore semicolons inside `--` comments. This one
+was inside a **string literal**, which the fix's own ponytail comment listed
+as a remaining ceiling. It then took a second attempt: quote tracking was
+added for `'` only, and this project writes table comments as `COMMENT "…"`,
+so the double-quoted case sailed straight through and failed identically.
+
+**Fix.** `_terminator` now tracks both quote characters and treats a doubled
+quote as an escape. Five tests in `tests/test_run_sql.py` cover comments,
+single quotes, double quotes, escaped quotes and trailing comments.
+
+**The lesson is not about quoting.** Three separate runs have now been broken
+by a semicolon that I wrote into a sentence — E34 twice and this. Each time
+the fix was scoped to exactly the case that had just failed, and each time the
+next sentence found the gap beside it. A ceiling written down in a comment is
+not a fix, and "this is true of every file here" ages badly when you are the
+one writing the next file.

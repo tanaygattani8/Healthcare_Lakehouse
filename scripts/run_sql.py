@@ -13,23 +13,49 @@ def _is_comment(statement: str) -> bool:
     )
 
 
+def _terminator(line: str) -> int | None:
+    """Where this line's statement ends, or None.
+
+    A ';' only ends a statement when it is code — not inside a '--' comment,
+    and not inside a quoted string. Both have now broken a run: prose in a
+    comment (errors.md E34) and prose inside a COMMENT '...' literal.
+    """
+    quote = ""          # which character opened the string we are inside
+    i = 0
+    while i < len(line):
+        char = line[i]
+        if quote:
+            if char == quote:
+                # a doubled quote is an escape, not the end of the string
+                if i + 1 < len(line) and line[i + 1] == quote:
+                    i += 1
+                else:
+                    quote = ""
+        elif char in "'\"":
+            # Both kinds matter: COMMENT "..." is how this project writes
+            # table comments, and those comments are English prose.
+            quote = char
+        elif char == "-" and line[i : i + 2] == "--":
+            return None
+        elif char == ";":
+            return i
+        i += 1
+    return None
+
+
 def _statements(text: str) -> list[str]:
-    # Split on ';', but only where it is actually code. A plain text.split(';')
-    # cuts prose in half the first time a comment contains a semicolon, and
-    # sends the second half to the warehouse as SQL.
-    # ponytail: one terminator per line, and ';' inside a string literal still
-    # splits. Both are true of every file here; reach for sqlglot if that ends.
+    # ponytail: one terminator per line, and no /* block comments */. Both
+    # hold for every file here — reach for sqlglot if that ever stops.
     chunks: list[str] = []
     buffer: list[str] = []
     for line in text.splitlines():
-        code = line.split("--", 1)[0]
-        if ";" in code:
-            end = line.index(";", 0, len(code))
+        end = _terminator(line)
+        if end is None:
+            buffer.append(line)
+        else:
             buffer.append(line[:end])
             chunks.append("\n".join(buffer))
             buffer = [line[end + 1 :]]
-        else:
-            buffer.append(line)
     chunks.append("\n".join(buffer))
     # A file ending in a comment leaves a trailing comment-only chunk, which
     # the warehouse rejects as a parse error after every statement succeeded.

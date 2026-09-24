@@ -1251,3 +1251,69 @@ Date coverage after both fixes: **1,567 of 1,567 date-shaped strings, 100%**.
 **Why this justifies doing step 3 before step 1.** None of it needed the notes
 uploaded. Had it been found later, the answer sheet, every detector's score and
 the MLflow history would all have been rebuilt — after spending 370 MB of quota.
+
+### D51 — the name-finding model: the right one is correct and too slow
+
+P5 could not be answered from SQL, so the notebooks were submitted as job runs
+with `databricks jobs submit` — the same `runs/submit` route proved in
+[D33](#d33). Two practical notes for anyone repeating this: Git Bash rewrites
+`/Users/...` into a Windows path, so `MSYS_NO_PATHCONV=1` is needed on every
+`databricks workspace` call; and a notebook's printed output is **not**
+returned by the jobs API. Without a closing `dbutils.notebook.exit(json)` a
+command-line run tells you only that it finished, which is the least useful
+thing it could say. The first P5 run had to be repeated for exactly that.
+
+**P5 — `dslim/bert-base-NER`, trained on news text.** 1.28s per piece, and the
+"names" it returned were `Yu`, `Co`, `##dicare`. Wordpiece fragments. It found
+37 things and none of them were a patient.
+
+**P5b — the comparison that mattered.** The measure is not how many names a
+model finds but **whether it finds the real patient's first name**, so the
+probe selected pieces already known to contain it and asked exactly that.
+
+| Model | s/piece | Hours for 41,592 | Real name found |
+|---|---:|---:|---|
+| `obi/deid_roberta_i2b2` | 4.16 | **48.1** | **20/20** |
+| `dslim/bert-base-NER` | 1.26 | 14.5 | 8/20 |
+
+`obi/deid_roberta_i2b2` is trained on i2b2 de-identification data — clinical
+notes labelled for this exact task. It returns `Yuette` where the news model
+returns `Yu`, which is the whole difference: one is a name, the other is a
+fragment that would redact three characters and leave the rest in place.
+
+**So the correct model costs 48 hours on a CPU** and the affordable one has
+0.4 recall on the only thing that matters. That is the real constraint on
+stage 2, and it is a Free Edition constraint — no GPU — not a flaw in the
+approach.
+
+**Hugging Face downloads work.** The spec assumed outbound internet was
+restricted enough to force in-platform models. Both models downloaded without
+trouble, which widens the options for stage 2 beyond what §4.3 planned for.
+
+**P5c — batching does not help.** The 4.16s came from a Python loop, and
+transformers batches on CPU, so this looked like the obvious lever:
+
+| Batch size | s/piece | Hours for 41,592 |
+|---:|---:|---:|
+| 1 | 3.96 | 45.7 |
+| 8 | 3.89 | 45.0 |
+| 32 | 4.05 | 46.8 |
+
+Nothing. The CPU is already saturated, so grouping the work changes only how
+it is queued. Batch 32 is marginally *worse*, which is memory pressure.
+
+**The test set has to shrink, and it must shrink for every stage, not just
+stage 2.** The language model has the same problem from a different direction:
+41,592 `ai_query` calls at roughly 2s each is another 23 hours. Shrinking only
+the stage that is slow would score the stages on different data and make the
+comparison meaningless — which is the one thing this phase exists to avoid.
+
+**Recommended: 25 patients, about 5,200 pieces.** Stage 2 lands near 5.6
+hours and stage 3 near 3 — both overnight jobs rather than impossible ones.
+The sample is still large: a first name appears roughly 89 times per note, so
+25 patients gives about 2,200 name occurrences and a similar number of dates.
+Per-category recall is measured on thousands of instances, not dozens.
+
+**What this costs, said plainly.** The spec asked for per-note F1 across the
+corpus. It will be per-note F1 across 25 notes. That is a real reduction and
+it belongs next to every number reported, not in a footnote.
