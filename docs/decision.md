@@ -1317,3 +1317,44 @@ Per-category recall is measured on thousands of instances, not dozens.
 **What this costs, said plainly.** The spec asked for per-note F1 across the
 corpus. It will be per-note F1 across 25 notes. That is a real reduction and
 it belongs next to every number reported, not in a footnote.
+
+### D52 — the answer sheet, built: two of its assumptions measured and dropped
+
+`silver.phi_span` holds **439,651 positions** across all 1,148 patients:
+249,887 names, 187,540 dates, 2,224 ages over 89. No patient has zero, no
+position is recorded twice, and the `surface_text` column is masked for
+anyone without clearance (0 → 439,651 → 0 masked rows when clearance was
+removed and restored).
+
+**The ambiguous-name ceiling is 0.3%, not a ceiling.** Step 3 planned to count
+surnames that are also ordinary words (`Gray`, `Young`) from a hand-typed list
+of 17, because a program that finds "gray hair" is wrong through no fault of
+its own. A hand-typed list only finds the ambiguity you thought of, so the
+notes themselves were used as the dictionary instead: a name value is ordinary
+if it also appears lower-case anywhere in 370 MB of clinical text. Three of
+1,159 name values are — `Alpha`, `Ward`, `Manual` — covering 641 of 249,887
+name positions. Surnames were never the risk, because [D50](#d50) showed the
+notes contain first names only. Every later score can be read as if the
+ceiling were 100%.
+
+**Dates are solved before any program runs.** Every one of the 187,540
+date-shaped strings in every note is a real patient date — birth, death or
+visit — with no exceptions. So any program that tags "anything shaped like a
+date" scores perfect recall and perfect precision on dates. That is a property
+of Synthea (its notes contain no other dates: no "last updated", no drug
+approval years), not an achievement of the regex, and it must be said next to
+the regex program's date score. Real notes would not be this kind. The
+phase's only open question is now names.
+
+**The 3-character minimum is gone.** It was written so that a value like `Mr`
+would not match every line. It never met a value like that; it met seven
+two-letter first names, whose 1,898 occurrences all sit in their own patient's
+note and **zero** times in anyone else's. Whole-word, case-sensitive matching
+was already the guard. The rule's only effect was to leave real names off the
+answer sheet, which would have marked every program wrong for finding them —
+see [E41](errors.md#e41).
+
+**Correction to D50.** The notes usually carry only the first name, but one
+patient's note writes first and middle together (`[FIRST] [MIDDLE] is a 50
+year-old…`), 198 times. Synthea appears to treat it as a double first name.
+The answer sheet catches it because `MIDDLE` is already searched.

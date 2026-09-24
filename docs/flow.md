@@ -497,3 +497,20 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
 - Errors E34–E38. Two of them silent, both in the governance layer itself: a
   drift check that would have passed for ever (E37) and a function the file and
   the catalog disagreed about (E38).
+
+### Cycle 13 — 2026-09-24 · Phase 3b steps 0–3 · notes in, answer sheet built
+
+- **Notes landed** as `bronze.br_notes` (1,148 rows, one per patient) and cut
+  into 214,238 overlapping pieces in `silver.note_chunk`; every note rebuilds
+  exactly from its pieces.
+- **Test set fixed before any program ran**: `ops.heldout_patient`, 25
+  patients, 5,263 pieces — cut from 200 by NER cost on CPU (D51).
+- **The answer sheet is built locally**, because it needs the note text and the
+  patient details matched by exact search:
+  `synthea/output/notes` + `silver.patient` + `silver.encounter` →
+  `scripts/build_answer_key.py` → `data/phi_span.csv` (gitignored, holds real
+  names) → landing volume → `sql/phi_span.sql` → `silver.phi_span`,
+  `surface_text` masked by the silver schema policy.
+- Errors E39–E42. Three were in the answer sheet and none raised anything: a
+  10-hour search (E40), a filter dropping real names (E41), duplicate rows
+  (E42). Any of them would have moved every score in the phase.

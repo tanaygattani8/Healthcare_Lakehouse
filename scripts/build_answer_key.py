@@ -29,11 +29,27 @@ COLUMNS = {
     "other_id": ["PASSPORT"],
 }
 
-# Anything shorter than this matches far too much. "Mr" would hit every line.
-TOO_SHORT = 3
+# No minimum length. There used to be one (3 characters, "Mr would hit every
+# line") and it only ever dropped real names: 7 two-letter first names, 1,898
+# occurrences in their own patients' notes and ZERO in anyone else's.
+# find_all() is whole-word and case-sensitive, which is the real guard.
 
 MONTHS = ["January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
+
+# Anything shaped like one of the date_forms() below. The note is searched
+# once for this, and each hit is looked up in the patient's set of real dates.
+# Searching once per date per form instead took ~10 hours on the full corpus:
+# a patient with 500 visits meant 3,000 passes over a 3 MB note.
+_MONTH = "(?:" + "|".join(MONTHS) + ")"
+DATE_SHAPE = re.compile(
+    r"(?<!\w)(?:"
+    r"\d{4}-\d{2}-\d{2}"                 # 1971-05-01
+    r"|\d{1,2}/\d{1,2}/\d{4}"            # 5/1/1971, 05/01/1971
+    rf"|{_MONTH} \d{{1,2}}, \d{{4}}"     # May 1, 1971 / May 01, 1971
+    rf"|\d{{1,2}} {_MONTH} \d{{4}}"      # 1 May 1971
+    r")(?!\w)"
+)
 
 
 def check_we_can_see_real_data(cur) -> None:
@@ -143,7 +159,6 @@ def main() -> None:
     print(f"{len(patients)} patients, {len(notes)} note files on disk")
 
     spans: list[tuple] = []
-    skipped_short = 0
     missing_note = 0
 
     for patient in patients:
@@ -154,27 +169,25 @@ def main() -> None:
         note = path.read_text(encoding="utf-8", errors="replace")
 
         for category, columns in COLUMNS.items():
-            for column in columns:
-                value = (patient.get(column) or "").strip()
-                if not value:
-                    continue
-                if len(value) < TOO_SHORT:
-                    skipped_short += 1
-                    continue
+            # A set: 3 patients have FIRST == MIDDLE, which wrote every one of
+            # their name positions twice (902 duplicate rows). A program that
+            # finds the name once would have been marked as missing it once.
+            values = {(patient.get(c) or "").strip() for c in columns} - {""}
+            for value in sorted(values):
                 for start, end in find_all(note, value):
                     spans.append((patient["patient_id"], start, end,
                                   category, value))
 
-        # Birth, death, and every visit. Duplicates are removed because a
-        # patient can have several encounters on one day and we would
-        # otherwise record the same position twice.
+        # Birth, death, and every visit. A set, because a patient can have
+        # several encounters on one day and 12/11/1971 is both the padded and
+        # unpadded form — either would record the same position twice.
         dates = {patient.get("birth_date_str"), patient.get("death_date_str")}
         dates.update(visits.get(patient["patient_id"], []))
-        for value in sorted(d for d in dates if d):
-            for form in date_forms(value):
-                for start, end in find_all(note, form):
-                    spans.append((patient["patient_id"], start, end,
-                                  "date", form))
+        wanted = {form for d in dates if d for form in date_forms(d)}
+        for match in DATE_SHAPE.finditer(note):
+            if match.group() in wanted:
+                spans.append((patient["patient_id"], match.start(),
+                              match.end(), "date", match.group()))
 
         # Safe Harbor only requires suppressing ages OVER 89. An age of 55 is
         # not an identifier, so matching every "NN year-old" would flood the
@@ -199,7 +212,8 @@ def main() -> None:
     print(f"\n{len(spans)} spans written to {args.out}")
     for category, count in sorted(by_category.items(), key=lambda x: -x[1]):
         print(f"  {category:<12} {count:>7}")
-    print(f"\nvalues skipped for being under {TOO_SHORT} characters: {skipped_short}")
+    duplicates = len(spans) - len({s[:3] for s in spans})
+    print(f"\npositions recorded more than once: {duplicates}")
     if missing_note:
         print(f"patients with no note file: {missing_note}")
     print(f"PATIENTS WITH NO SPANS AT ALL: {len(patients) - with_spans - missing_note}")
