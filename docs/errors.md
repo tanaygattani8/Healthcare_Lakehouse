@@ -65,6 +65,8 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E40](#e40) | Answer-sheet build: no output after 2h45m, estimated 10 hours | 3b |
 | [E41](#e41) | `values skipped for being under 3 characters: 14` — looks harmless | 3b |
 | [E42](#e42) | None visible — 902 answer-sheet rows are exact duplicates | 3b |
+| [E43](#e43) | A 3-row `ai_query` test runs for 6+ minutes | 3b |
+| [E44](#e44) | Job says `Run cancelled by user`; nobody cancelled it. Warehouse will not start | 3b |
 
 ---
 
@@ -1255,3 +1257,61 @@ an invisible penalty on three patients.
 **Fix.** Each category's values are collected into a set before searching.
 The script now prints `positions recorded more than once` (must be 0), and
 `sql/phi_span.sql` checks the same thing in the table.
+
+### E43 — a three-row test of the language model runs for minutes {#e43}
+
+No error. A smoke test meant to send 3 note pieces to `ai_query` was still
+running after 6 minutes, where the same 3 pieces take 9 seconds.
+
+**Cause.** The query was shaped
+`SELECT chunk_text, ai_query(...) FROM note_chunk JOIN heldout ORDER BY … LIMIT 3`.
+The `LIMIT` sits outside the projection that calls the model, and nothing
+obliges the engine to pick the 3 rows before computing the column. The model
+was being asked about all 5,263 test-set pieces, of which 3 would be kept.
+
+**Fix.** Choose the rows first, in their own query (`WITH three AS (… LIMIT 3)`),
+then call the model on that. 9 seconds. `scripts/detect_llm.py ask` never
+puts a `LIMIT` near `ai_query`: it filters by patient, which the engine does
+apply before the call.
+
+**Not cleaned up.** Cancelling the runaway statement through the API was
+refused by the permission check, correctly: it is an action on the
+workspace, not the laptop. It was left to finish on its own.
+
+**Confirmed by its runtime.** It finished after **27 min 47 s** and returned
+its 3 rows. The real run that asks about all 5,263 pieces took about 25
+minutes. Same work, so the model really was called on every piece.
+
+**Lesson.** When a column is expensive — a model call, a UDF that hits the
+network — a `LIMIT` is not a cost control unless it is applied to a subquery
+that finishes first.
+
+### E44 — "Run cancelled by user", and nobody cancelled it {#e44}
+
+```
+Run cancelled by user
+```
+
+The Program 2 job (the name-finding model, ~6 hours) stopped at 12:20 after
+starting at 10:23. The run-level message blames a user. The **task** level
+says what happened:
+
+```
+Cluster ... was terminated during the run
+(cluster state message: Cluster terminated by RESOURCE_USAGE_BLOCKED)
+```
+
+**Cause.** Databricks Free Edition caps compute use. That day had the
+language-model run, the name-model job and ordinary warehouse queries, and the
+cap was reached. After it, the SQL warehouse would not start either: a
+one-line `count(*)` hung for minutes against a `STOPPED` warehouse.
+
+**Fix.** Program 2 moved to the laptop (`scripts/detect_ner.py`), which has
+the notes already, no cap, and ran at 3.3 s per piece — faster than
+Databricks' 4. The job had been built to save one patient at a time, so
+nothing it finished is lost, and the laptop run replaces those rows anyway.
+
+**Lesson.** Read the task's state, not the run's. The run-level message was
+the platform's retry being cleaned up, and it pointed at the wrong culprit.
+On Free Edition, a multi-hour CPU job is also a budget decision: it spends
+the compute the next steps need.
