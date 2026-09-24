@@ -62,6 +62,9 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E37](#e37) | `column_masks` empty although masking demonstrably works | 3a |
 | [E38](#e38) | A renamed function exists under both names | 3a |
 | [E39](#e39) | `PARSE_SYNTAX_ERROR at or near '"'` on a valid CREATE TABLE | 3b |
+| [E40](#e40) | Answer-sheet build: no output after 2h45m, estimated 10 hours | 3b |
+| [E41](#e41) | `values skipped for being under 3 characters: 14` — looks harmless | 3b |
+| [E42](#e42) | None visible — 902 answer-sheet rows are exact duplicates | 3b |
 
 ---
 
@@ -1196,3 +1199,59 @@ the fix was scoped to exactly the case that had just failed, and each time the
 next sentence found the gap beside it. A ceiling written down in a comment is
 not a fix, and "this is true of every file here" ages badly when you are the
 one writing the next file.
+
+### E40 — the answer sheet takes 10 hours to build {#e40}
+
+No error. `build_answer_key.py` ran for 2h45m on all 1,148 patients with no
+output (a pipe buffers it) before anyone asked how long it would take.
+Measured: one search costs 0.04 s per MB, and the estimate was ~10 hours.
+
+**Cause.** Dates were found by searching the whole note once *per date, per
+format* — six formats. A patient with 500 visits and a 3 MB note meant 3,000
+passes over 3 MB. Bigger notes also have more visits, so the cost grows with
+the square of note size, and the ten-patient trial run finished quickly
+because its ten notes were small.
+
+**Fix.** One pass per note for anything date-shaped (`DATE_SHAPE`), each hit
+checked against a set of that patient's real dates. Full run: **4 minutes**.
+Proven equivalent by rebuilding the ten patients and diffing: 3,361 rows each,
+none missing, none extra. `tests/test_build_answer_key.py` fails if a format is
+added to `date_forms()` but not to `DATE_SHAPE`.
+
+**Lesson.** A trial run on the first N rows measures the first N rows. When
+cost depends on size, try it on the largest input, not the first.
+
+### E41 — a filter written for noise was dropping real names {#e41}
+
+```
+values skipped for being under 3 characters: 14
+```
+
+Printed every run, read as a harmless tally. It was 14 real values — nine
+two-letter first names (seven distinct) and five middle names — left off the
+answer sheet by a rule written to stop `Mr` matching every line.
+
+Measured against every note: the first names occur **1,898 times in their own
+patient's note and zero times in anyone else's**. Whole-word, case-sensitive
+matching already prevented the noise the rule was for. Its only effect was
+that any program correctly finding those names would have been marked wrong
+1,898 times.
+
+**Fix.** Rule deleted. One short middle name then added 198 real positions
+(that patient's note writes first and middle together — decision.md D52).
+
+**Lesson.** A guard written from imagination, not measurement, will quietly
+do something other than what it was for. The count it printed was the clue.
+
+### E42 — the answer sheet recorded 902 positions twice {#e42}
+
+No symptom. Found by checking whether any two answer-sheet positions overlap.
+
+**Cause.** Three patients have `FIRST == MIDDLE`. Each column was searched
+separately, so every position of that name was written once per column. A
+program finding the name once would have been scored as missing it once —
+an invisible penalty on three patients.
+
+**Fix.** Each category's values are collected into a set before searching.
+The script now prints `positions recorded more than once` (must be 0), and
+`sql/phi_span.sql` checks the same thing in the table.
