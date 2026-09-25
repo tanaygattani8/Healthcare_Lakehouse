@@ -7,9 +7,42 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 3a complete — bronze landed, silver modelled, the pipeline
-triggered from Airflow, PHI columns classified and masked. Phase 3b (the
-de-identification AI) is next.
+**Status:** Phase 3b complete — bronze landed, silver modelled, the pipeline
+triggered from Airflow, PHI columns classified and masked, and clinical notes
+searched for private details by four programs, marked, and de-identified.
+
+## What phase 3b produced
+
+Synthea's 1,148 clinical notes were searched for private details by four
+programs, each marked against an answer sheet of 439,651 positions built from
+the patient's own record. Scored on 25 test patients, chosen before any
+program ran:
+
+| Program | Names hidden | Dates hidden |
+|---|---:|---:|
+| 0 · look up the patient's own details | 1.000 | 1.000 |
+| 1 · patterns, no patient list | 0 | 1.000 |
+| 2 · name model (`obi/deid_roberta_i2b2`) | 0.860 | 0.952 |
+| 3 · language model (Llama 3.3 70B via `ai_query`) | **0.996** | 0.996 |
+
+"Hidden" means one guess covered the whole real item; finding `Luc` in
+`Lucius` does not count, because `ius` is still in the note. Program 0 is the
+answer sheet, so its score proves the marking works. Program 1's perfect dates
+are a property of synthetic notes, where every date-shaped string is a real
+date. Both models also flag thousands of things that are not private — ages
+under 90, insurers, ethnicity — which the app shows as false alarms.
+
+The **de-identified copy** is a separate `deid` schema, so `gold` keeps
+reading true values. Every patient gets a new random id and one random date
+shift, stored only in `ops`. Checked: every gap between a patient's visits is
+unchanged, no note still names its patient, and no date was lost.
+
+**Following Safe Harbor was not enough.** Birth year, 3-digit ZIP and gender
+left 467 of 1,148 people alone in their group. The released table drops ZIP,
+uses 5-year bands, and blanks the 143 people still in groups under 5.
+
+The four runs are recorded in MLflow; the scores and group sizes are on the
+app's second page.
 
 ## What phase 3a produced
 
@@ -151,6 +184,8 @@ there is none.
 | Databricks Apps for internal hosting | An App behind workspace SSO | Streamlit Community Cloud — Apps sit behind workspace auth and stop after 24h |
 | One account, which owns every object | A service principal owns `ops`; analysts get `SELECT` on `silver` and nothing on `ops` | A row in `ops.phi_clearance`. **Separation of duties is impossible here, not merely weak** — there is one principal and it owns everything, so the masks demonstrate a mechanism and enforce nothing against their owner. A second principal is the fix; `REVOKE` is not |
 | One state in the dataset | Row filters segregate by region | The filter works and is verified, but with every patient in Massachusetts it can only be all-rows or no-rows |
+| No GPU, and a daily compute cap | The name model runs on GPU inference | It ran 6.5 hours on a laptop CPU after the cap stopped the Databricks job two hours in. The test set was cut to 25 patients so every program could afford it |
+| Synthetic notes | Real notes name relatives and clinicians, and write dates many ways | Synthea notes hold first names and ISO dates only, so these scores are a ceiling for real notes, not a forecast |
 
 ## Scope rule
 

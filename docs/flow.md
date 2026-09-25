@@ -514,3 +514,24 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
 - Errors E39–E42. Three were in the answer sheet and none raised anything: a
   10-hour search (E40), a filter dropping real names (E41), duplicate rows
   (E42). Any of them would have moved every score in the phase.
+
+### Cycle 14 — 2026-09-24/25 · Phase 3b steps 4-8 · detect, mark, de-identify, publish
+
+- **Four programs**, all writing `ops.detection_span` for the 25 test
+  patients: roster (SQL), patterns (`scripts/detect_regex.py`), name model
+  (`scripts/detect_ner.py`, laptop, after Databricks' cap stopped it, E44),
+  language model (`scripts/detect_llm.py`, one `ai_query` statement per
+  patient, replies kept in `ops.llm_reply`). Laptop CSVs reach the table via
+  the landing volume and `sql/load_detections.sql`.
+- **Marking**: `sql/score_detection.sql` -> `ops.detection_score`, rewritten
+  after recall came out at 1.053 (E45). Logged to MLflow by
+  `scripts/log_mlflow.py`.
+- **De-identified copy**: `sql/deid.sql` builds `ops.deid_key` (the secret),
+  the `ops.deid_text` Python function, and `deid.patient`, `deid.encounter`,
+  `deid.note`. `sql/check_deid.sql` proves it. `sql/kanon.sql` ->
+  `ops.kanon_spread`.
+- **Published**: `scripts/publish_snapshot.py` now also writes
+  `snapshots/deid_scores.parquet` and `deid_kanon.parquet`, and refuses any
+  text that is not a known category. `app/pages/2_De-identification.py`.
+- Errors E43-E47. The two that would have shipped wrong numbers were in the
+  marking query and the model's merge step, not in any model.

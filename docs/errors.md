@@ -67,6 +67,9 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E42](#e42) | None visible — 902 answer-sheet rows are exact duplicates | 3b |
 | [E43](#e43) | A 3-row `ai_query` test runs for 6+ minutes | 3b |
 | [E44](#e44) | Job says `Run cancelled by user`; nobody cancelled it. Warehouse will not start | 3b |
+| [E45](#e45) | Scoring: `recall=1.053` — more real dates found than exist | 3b |
+| [E46](#e46) | Name model returns `B`, `ab`, `ara` for one name | 3b |
+| [E47](#e47) | `UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f3c3'` after an MLflow run | 3b |
 
 ---
 
@@ -1315,3 +1318,77 @@ nothing it finished is lost, and the laptop run replaces those rows anyway.
 the platform's retry being cleaned up, and it pointed at the wrong culprit.
 On Free Edition, a multi-hour CPU job is also a budget decision: it spends
 the compute the next steps need.
+
+### E45 — recall of 1.053 {#e45}
+
+```
+Row(stage='ner', phi_category='date', total_real=4362, total_guesses=4922,
+    found_correctly=4594, precision=0.933, recall=1.053, f1=0.99)
+```
+
+**Cause.** The marking query (written in the plan, by me) used one number —
+guesses that overlap a real item — as the top of both precision and recall.
+Recall must count *real items hit*. The two only agree when guesses and real
+items pair up one to one, and they do not, in either direction:
+
+- The name model split one date into four guesses (`20`, `23`, `-`, `12-17`):
+  four "correct" for one real date, so recall went over 1.
+- The language model returned `Babara Isadora` as one guess where the answer
+  sheet has first and middle name separately: one "correct" for two real
+  names, so recall went **down** — 0.880 reported, 0.996 true.
+
+The second direction is the dangerous one, because nothing about 0.880 looks
+wrong. Only the impossible 1.053 gave it away.
+
+**Also fixed in the same query.** It joined each program's guesses to the
+answer sheet by kind with an inner join, so every kind the sheet has none of
+disappeared: 6,908 flagged ages, 3,574 "identifiers" (mostly insurers), 889
+drug doses read as ZIP codes. Those are all false alarms and none of them
+reached a precision figure.
+
+**Fix.** `sql/score_detection.sql` counts `DISTINCT truth_id` for recall and
+`DISTINCT guess_id` for precision, and keeps kinds with no real items. Checked
+two ways: Program 0 (the answer sheet itself) scores exactly 1.0, and the
+numbers match an independent recount in Python from the local CSVs.
+
+**Lesson.** A metric that can exceed its bound is broken in a way that can
+also move it inside the bound. Test the marking with a case that is not
+one-to-one, not only with a perfect score.
+
+### E46 — one name comes back in three pieces {#e46}
+
+Found while reading E45's examples: `Babara` → `B`, `ab`, `ara Isadora`.
+
+**Cause.** `merge()` in `scripts/detect_ner.py` joined a token only to the
+last span of *any* kind. Windows overlap, and two windows can label the same
+token differently; when a `geography` span sorted between two name fragments,
+the fragments never met.
+
+**Nothing was missed** — the fragments still cover the name — but the model's
+guess counts were inflated: dates went from 4,922 guesses to 4,459 after
+re-merging, names 4,123 to 4,118.
+
+**Fix.** Each kind keeps its own last span. The saved spans were re-merged with
+the fixed code rather than re-running 6.5 hours of model: joining saved spans
+gives the same result as joining the original tokens. The first test written
+for this passed on the broken code too — the odd label has to *sort between*
+the fragments to reproduce it — so it was tightened until it failed without
+the fix.
+
+### E47 — MLflow crashes after logging a run, on Windows {#e47}
+
+```
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f3c3'
+```
+
+**Cause.** MLflow prints a runner emoji and `View run ... at: <url>` when a
+run ends. The Windows console's default encoding (cp1252) has no emoji, so
+the print raised after the run had been created and before it was marked
+finished. The first run was left `RUNNING` in the experiment.
+
+**Fix.** `scripts/log_mlflow.py` switches stdout to UTF-8 before logging. The
+half-finished run was deleted before the four runs were logged again.
+
+**Lesson.** A library's decoration can fail after its real work, leaving
+state behind. Clean up what the crash left before re-running, or the record
+holds a duplicate.

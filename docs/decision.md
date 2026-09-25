@@ -1358,3 +1358,163 @@ see [E41](errors.md#e41).
 patient's note writes first and middle together (`[FIRST] [MIDDLE] is a 50
 year-old…`), 198 times. Synthea appears to treat it as a double first name.
 The answer sheet catches it because `MIDDLE` is already searched.
+
+### D53 — step 4 and 5: the language model wins on names, and the rest is false alarms
+
+All four programs were run on the 25 test patients and marked by
+`sql/score_detection.sql` (corrected in errors.md E45).
+
+| Program | Name recall | Name precision | Date recall | Date precision |
+|---|---:|---:|---:|---:|
+| 0 — look up and search | 1.000 | 1.000 | 1.000 | 1.000 |
+| 1 — pattern matching | — | — | 1.000 | 1.000 |
+| 2 — name model (`obi/deid_roberta_i2b2`) | 0.913 | 0.960 | 0.994 | 0.973 |
+| 3 — language model (Llama 3.3 70B) | **0.996** | 0.998 | 0.996 | 0.999 |
+
+**Program 0 is not a result.** It is the answer sheet, and its 1.000 proves
+the marking works. **Program 1's perfect dates are not to its credit**: every
+date-shaped string in these notes is a real date (D52). It finds no names.
+
+**The real comparison is 2 against 3, on names.** The language model misses
+20 of 4,956 names; the name model misses 431. For de-identification that is
+the only column that matters — a miss is a real name left in a document.
+
+**What they also flag, which is not private here** (no real items of that
+kind in the test set, so every one is a false alarm):
+
+| | Language model | Name model | Pattern matching |
+|---|---:|---:|---:|
+| Ages (all under 90) | 6,908 | 6,876 | — |
+| "Identifiers" (insurers: Medicare, Humana…) | 3,574 | 827 | — |
+| "Places" (e.g. "hispanic white") | 516 | 2,463 | — |
+| "ZIP codes" (drug doses: `0.00354 mg/hr`) | — | — | 889 |
+
+Redacting those does no privacy harm and some readability harm; it is the
+cost side of the trade.
+
+**How each ran, and what it cost.**
+
+- **Language model:** one `ai_query` statement per patient, so the calls ran
+  in parallel. 5,263 pieces in ~25 minutes, not the 2.9 hours planned. 24
+  replies closed their JSON with `)` and were counted as finding nothing;
+  34 returned some text not in the piece word for word. Left strict: a
+  repaired reply is the parser's success, not the model's.
+- **Name model:** started on Databricks, stopped two hours in by Free
+  Edition's usage cap (E44), finished on the laptop in ~6.5 hours at 4.5 s
+  per piece. **71% of pieces were longer than the model's 512-token limit**,
+  so each is read in overlapping windows. The P5 probes (D51) fed whole
+  pieces to a pipeline and may have been measuring cut-off text; the 20/20
+  there should be read with that in mind.
+
+**Limits of these numbers, said where they are.** 25 notes, not the corpus
+(D51). No ages over 89 in the test set, so the one age rule Safe Harbor has is
+untested. And Synthea notes are an easy case — first names only, one date
+format, no other people named — so both models' name recall here is a ceiling
+for real notes, not a forecast.
+
+### D54 — what counts as "found": whole coverage, not overlap or exact match
+
+The plan asked for exact and overlap scores side by side, one chosen with a
+reason. Both turned out to measure the wrong thing, so a third was added.
+
+| Program | overlap | **covered** | exact |
+|---|---:|---:|---:|
+| Language model, names | 0.996 | **0.996** | 0.758 |
+| Name model, names | 0.913 | **0.860** | 0.623 |
+| Language model, dates | 0.996 | **0.996** | 0.996 |
+| Name model, dates | 0.994 | **0.952** | 0.310 |
+
+- **Overlap is too generous.** A guess of `Luc` inside `Lucius` counts as a
+  hit and leaves `ius` in the document. The name model's 0.913 includes about
+  5% of names it only partly covered.
+- **Exact is too strict.** It marks `Babara Isadora`, one guess over two real
+  names, as a miss on both, and that guess hides them perfectly. The
+  language model's 0.758 is almost entirely this.
+- **Covered** (one guess spans the whole real item) is what
+  de-identification needs. It is the headline number everywhere.
+
+It is a slight under-count: a name hidden by two adjacent guesses, neither
+covering it alone, is scored as a miss. Merging per kind (errors E46) made
+that rare.
+
+### D55 — the de-identified copy: three changes to the plan, and what it is not
+
+**The plan's date shift was reversible.** It computed each patient's shift as
+`hash(patient_id) % 364` and kept `patient_id` in the copy. The formula is in
+a public repo, so anyone holding the copy could compute every shift and undo
+it. Instead `ops.deid_key` holds a random shift and a new random `deid_id`
+per patient, drawn once and kept (a rerun adds keys only for new patients).
+The copy carries `deid_id` only. That table is the whole re-identification
+risk, and it never leaves `ops`.
+
+**Full dates stay out of the patient table.** Birth and death became 5-year
+bands (D56), blank for anyone over 89. Encounter and note dates are *shifted*
+instead, because phase 4's readmission work needs the gaps between visits.
+**Shifting is not Safe Harbor**, which permits the year only. It is the
+standard research compromise, and a year-only copy would make 30-day
+readmission impossible to compute.
+
+**Notes are redacted with the patient's own details, not a model.** Here the
+patient is known and Program 0 scored 1.000; the models answer a different
+question: what to do when you do not have that list. What this misses is
+anything not in the patient record: a relative's name, a clinician's.
+Synthea's notes contain none (D50). Real notes would, and the language model
+is what would catch them.
+
+**Checked, each check shown able to fail:**
+
+| Check | Result |
+|---|---|
+| Keys | 1,148, none duplicated, shifts 1-364 days |
+| Every gap between consecutive visits unchanged | 0 of 1,148 patients changed |
+| Patient's first name still in their note | 0 of 1,148 (the same check on the original notes: 1,148) |
+| Dates moved, none lost | 187,540 before, 187,540 after |
+
+The plan's timing check compared only the first-to-last span per patient,
+which a shift applied per row could pass by luck. The check here compares
+every gap in order.
+
+The redaction function stops the build if the text at an answer-sheet
+position is not what the answer sheet says. Positions were measured on the
+laptop's copy of each note; one differing character would have garbled every
+replacement silently.
+
+### D56 — k-anonymity: Safe Harbor left 467 people alone; 5-year bands, no ZIP, k >= 5
+
+`k` is how many people share a combination an outsider could know. Measured
+on birth, ZIP and gender:
+
+| Detail kept | Alone (k = 1) | Fewer than 5 share it |
+|---|---:|---:|
+| Full birth date + ZIP3 + gender (the plan) | 912 of 1,148 | 1,099 |
+| Birth year + ZIP3 + gender (Safe Harbor) | 467 | 1,057 |
+| Released: 5-year bands, gender, death band, no ZIP | **0** | **0** |
+
+**Safe Harbor is a list of fields to remove, not a guarantee.** Doing exactly
+what it permits left 41% of people unique. The 3-digit ZIP did most of the
+damage, and in a one-state dataset it tells an analyst almost nothing, so it
+was dropped.
+
+**Death year counts.** With it, 128 people were alone who were not without
+it, so the check groups on birth band, gender and death band together.
+
+**Cut-off: k >= 5**, the usual threshold for record-level research data. The
+cost, measured before choosing:
+
+| Bands | People to blank |
+|---|---:|
+| Exact year | 309 (27%) |
+| **5-year** | **143 (12%)** |
+| 10-year | 83 (7%) |
+
+Five-year bands are the standard epidemiology age grouping, so age can still
+be adjusted for. Ten-year bands would blank fewer people but halve the age
+resolution for everyone. The 143 keep every other column; they lose only
+their birth and death bands, and then share one large group.
+
+**Not covered, said plainly.** Race, ethnicity, marital status and income
+were not counted as things an outsider could know. Income and healthcare
+spend are near-unique per person: anyone who knew someone's exact income
+could find them. Treating those as identifiers means rounding or dropping
+them, which is the next step if this copy were ever released beyond the
+workspace.

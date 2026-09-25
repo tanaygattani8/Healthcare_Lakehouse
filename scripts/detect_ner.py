@@ -62,14 +62,22 @@ def merge(tokens: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
     two fragments. A gap of one character (space, newline) still joins, so
     'Lucius Emard' is one name. Overlaps from overlapping pieces and windows
     collapse here too.
+
+    Each kind is joined separately. Overlapping windows can label the same
+    token differently, and comparing only with the previous span of ANY kind
+    let a 'geography' token sit between name fragments and keep them apart:
+    'Babara' came back as 'B' + 'ab' + 'ara' (errors.md E45).
     """
+    last: dict[str, list] = {}
     spans: list[list] = []
     for start, end, kind in sorted(tokens):
-        if spans and spans[-1][2] == kind and start <= spans[-1][1] + 1:
-            spans[-1][1] = max(spans[-1][1], end)
+        current = last.get(kind)
+        if current and start <= current[1] + 1:
+            current[1] = max(current[1], end)
         else:
-            spans.append([start, end, kind])
-    return [(s, e, k) for s, e, k in spans]
+            last[kind] = [start, end, kind]
+            spans.append(last[kind])
+    return sorted((s, e, k) for s, e, k in spans)
 
 
 def main() -> None:

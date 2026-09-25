@@ -44,6 +44,42 @@ def fetch_counts(catalog: str, entities: list[str]) -> pd.DataFrame:
     return df
 
 
+# Phase 3b: how well patient details were hidden. Both tables hold counts and
+# category labels only, and check_only_categories() refuses anything else — a
+# de-identification page that leaked a name would be the worst possible bug.
+DEID_SNAPSHOTS = {
+    "deid_scores": "SELECT stage, phi_category, real_items, guesses, precision, "
+                   "recall, covered_recall, exact_recall FROM {catalog}.ops.detection_score",
+    "deid_kanon": "SELECT version, k, groups, people FROM {catalog}.ops.kanon_spread",
+}
+ALLOWED_TEXT = {
+    "stage": {"roster", "regex", "ner", "llm"},
+    "phi_category": {"name", "date", "age", "geography", "other_id", "zip"},
+    "version": {"plan", "safe", "released"},
+    "k": {"1", "2", "3", "4", "5-10", "11+"},
+}
+
+
+def check_only_categories(df: pd.DataFrame) -> None:
+    """Stop before writing if any text column holds a value we did not expect."""
+    for column in df.select_dtypes(include="object").columns:
+        unexpected = set(df[column].dropna()) - ALLOWED_TEXT.get(column, set())
+        if unexpected:
+            raise SystemExit(f"refusing to publish: column {column!r} has "
+                             f"{len(unexpected)} value(s) that are not known categories")
+
+
+def fetch_deid(catalog: str) -> dict[str, pd.DataFrame]:
+    frames = {}
+    with dbx.connect() as conn, conn.cursor() as cur:
+        for name, query in DEID_SNAPSHOTS.items():
+            cur.execute(query.format(catalog=catalog))
+            df = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
+            check_only_categories(df)
+            frames[name] = df
+    return frames
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", default="healthcare_dev")
@@ -57,6 +93,12 @@ def main() -> None:
     df.to_parquet(args.out, index=False)
     print(df.to_string(index=False))
     print(f"Wrote {args.out}")
+
+    for name, frame in fetch_deid(args.catalog).items():
+        path = args.out.parent / f"{name}.parquet"
+        frame.to_parquet(path, index=False)
+        print(frame.to_string(index=False))
+        print(f"Wrote {path}")
 
 
 if __name__ == "__main__":

@@ -11,5 +11,12 @@ def test_repeats_from_overlapping_pieces_collapse():
     assert merge([(0, 6, "name"), (3, 6, "name"), (0, 6, "name")]) == [(0, 6, "name")]
 
 
+def test_a_token_labelled_differently_does_not_split_a_name():
+    # Two overlapping windows disagreed: one called 'B' a place. The name
+    # fragments must still join across it.
+    tokens = [(0, 1, "name"), (1, 3, "geography"), (1, 3, "name"), (3, 6, "name")]
+    assert merge(tokens) == [(0, 6, "name"), (1, 3, "geography")]
+
+
 def test_different_kinds_side_by_side_stay_apart():
     assert merge([(0, 6, "name"), (7, 17, "date")]) == [(0, 6, "name"), (7, 17, "date")]
