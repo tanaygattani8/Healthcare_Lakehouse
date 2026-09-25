@@ -1033,6 +1033,13 @@ anything, which is the whole lesson of E16. Branch `ci/prove-red` carries
 request from it, watch the lint job fail, record the date here, then close the
 PR and delete both the branch and the file.
 
+**Seen red 2026-09-25.** Pull request #1 from `ci/prove-red`, run
+36158841447, concluded `failure` at the right step: checkout, Python, `pip
+install` and both bundle validations passed, then `ruff check .` failed and
+`pytest` was skipped. A red caused by a broken install would have proved
+nothing, so the step was checked, not just the verdict. The gate is now known
+to pass and known to fail. E33 is closed.
+
 ---
 
 ## Phase 3a — PHI governance
