@@ -38,6 +38,10 @@ resources:
             path: pipelines/medallion/gold/dims.sql
         - file:
             path: pipelines/medallion/gold/fact_encounter.sql
+        - file:
+            path: pipelines/medallion/gold/planned_reason.sql
+        - file:
+            path: pipelines/medallion/gold/readmission_events.sql
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual

@@ -1550,3 +1550,45 @@ defined as the difference, so it could never fail.
 **Money totals match to the cent** (599,866,684.50 in both), not merely
 within the few cents rounding was expected to cost: Synthea's costs already
 have two decimal places.
+
+### D58 — readmissions: 15.97% became 17.54%, and each change accounted for
+
+`gold.readmission_events` has one row per hospital **stay**, not per
+encounter, with every exclusion as its own column. Proven in four checks:
+
+- **A.** The phase 1 gate, rerun on today's CSVs: 1,292 encounters, 24
+  died, 3 too little follow-up, 1,265 index, 202 readmitted, 15.97%.
+- **B.** The gate's rules rewritten on silver: **identical**, all five
+  numbers. No hospital encounter is in quarantine. So the DuckDB-to-Spark
+  translation changed nothing, and every later difference is a rule.
+- **C.** Each change switched on one at a time (`sql/readmission_ladder.sql`):
+
+| Step | Index stays | Readmitted | Rate |
+|---|---:|---:|---:|
+| B · the gate | 1,265 | 202 | 15.97% |
+| + merge overlapping and same-day encounters into stays | 1,144 | 202 | 17.66% |
+| + calendar days in Chicago, not UTC | 1,145 | 202 | 17.64% |
+| + data ends at the last visit of any kind | 1,146 | 202 | 17.63% |
+| + a planned return does not count = **the table** | **1,146** | **201** | **17.54%** |
+| Discharged to hospice | 0 stays | | |
+
+- **D.** The patient with the most merged encounters, checked by hand
+  against silver: three August 2025 encounters, each starting before the
+  last ended, are one stay; the gaps to the stays either side (2,017 and 128
+  days) are right.
+
+**Merging moved the rate by pushing the denominator down, not the numerator
+up.** The plan expected transfers to hide readmissions. Instead the count of
+readmissions did not move; what went was 121 "index admissions" that were
+really the middle of one stay. In the gate each of those counted as a
+patient who did not come back, which pulled the rate down. 122 encounters
+merged away: 52 stays of two, 35 of three.
+
+**Two changes to the plan's SQL.** The first encounter of a stay is chosen
+by start time *then id*: a tie broken at random could differ between SQL and
+PySpark (step 7) for no real reason. And a stay is planned by the reason it
+*began* with; the plan marked it planned if any encounter in it was, which
+would let an emergency that merged with a sterilization stop counting.
+
+The local-day, data-end and planned rules each moved one stay. They are
+right, and small here; they are not free on a real hospital's data.

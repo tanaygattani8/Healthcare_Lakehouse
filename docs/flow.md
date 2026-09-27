@@ -547,3 +547,8 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
   and `fact_encounter.sql`, both listed in `databricks.yml` and built with
   `refresh_selection`, never a full refresh.
 - **Checks**: `sql/check_gold.sql`, which grows each step and is rerun whole.
+- **Readmissions** (step 3): `planned_reason.sql` then
+  `readmission_events.sql`. Proven against a rerun of the phase 1 gate
+  (`scripts.readmission_gate --report data/readmission-gate-today.md`, never
+  the default report path, which is the committed phase 1 record);
+  `sql/readmission_ladder.sql` accounts for the rate change (D58).
