@@ -1518,3 +1518,35 @@ spend are near-unique per person: anyone who knew someone's exact income
 could find them. Treating those as identifiers means rounding or dropping
 them, which is the next step if this copy were ever released beyond the
 workspace.
+
+### D57 — gold: what the probes found before any table was built
+
+Seven probes ran before step 1. Three changed the plan.
+
+| Probe | Found | Changed |
+|---|---|---|
+| Can gold read the governed `silver.patient`? | 1,148 rows, 0 masked names | Nothing; the pipeline reads as a cleared user. `'***'` is the mask's real output, so the check could have failed |
+| Overlapping hospital stays | 122 of 1,292 start before the last ended; 97 start the day it ended | Merging into stays is needed |
+| Coronary heart disease `53741008` | **0 patients** | Statin group uses ischemic heart disease, history of bypass, history of and acute heart attack, and stroke instead |
+| Diabetes `44054006` | 79 patients; **87 more** have only a complication "due to type 2 diabetes" | The 7 complication codes join the diabetes group |
+| Nystatin (antifungal, contains "statin") | **0 patients** | The whole-word statin rule stays, but its check cannot fail on this data and was never exercised |
+| Data end | 2026-08-08 | Care gaps measured for 2025 |
+| FHIR encounter ids | 14 of 14 found in silver | FHIR reconciles on id, not patient + time |
+
+**Planned stays** (a return for one is not a readmission): sterilization,
+waiting for a kidney transplant, and sleep disorder, taken to be an
+overnight sleep study, which is an assumption about Synthea, not something
+the data shows. **Cancer stays count as unplanned.** A chemotherapy stay is
+planned and a complication is not, and the admission reason cannot tell them
+apart. Checking the stay's procedures would; it was left out as the smaller
+error.
+
+**Two checks added to the plan's, both able to fail.** Each reference table
+holds one row per id (bronze keeps every file it took in, and a file loaded
+twice would double every visit joined to it). No insurer paid more than the
+bill. A third, "paid + covered = total", was dropped: `patient_paid` is
+defined as the difference, so it could never fail.
+
+**Money totals match to the cent** (599,866,684.50 in both), not merely
+within the few cents rounding was expected to cost: Synthea's costs already
+have two decimal places.

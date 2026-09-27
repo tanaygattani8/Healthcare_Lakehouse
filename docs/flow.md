@@ -535,3 +535,15 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
   text that is not a known category. `app/pages/2_De-identification.py`.
 - Errors E43-E47. The two that would have shipped wrong numbers were in the
   marking query and the model's merge step, not in any model.
+
+### Cycle 15 — 2026-09-27 · Phase 4 probes, steps 1-2 · reference tables and the visit fact
+
+- **Probes**: `sql/probe_phase4.sql` (P2-P5, P7) and
+  `notebooks/p6_fhir_probe.py` (P6, one bundle on
+  `landing/fhir_probe/`). P1 was a throwaway gold view, built once and
+  dropped. Results and what they changed: decision.md D57.
+- **Gold starts in the pipeline**: `pipelines/medallion/gold/dims.sql`
+  (`dim_date`, `dim_organization`, `dim_provider`, `dim_payer`, from bronze)
+  and `fact_encounter.sql`, both listed in `databricks.yml` and built with
+  `refresh_selection`, never a full refresh.
+- **Checks**: `sql/check_gold.sql`, which grows each step and is rerun whole.

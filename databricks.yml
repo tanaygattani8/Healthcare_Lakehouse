@@ -34,6 +34,10 @@ resources:
             path: pipelines/medallion/silver/facts.sql
         - file:
             path: pipelines/medallion/silver/note_chunk.sql
+        - file:
+            path: pipelines/medallion/gold/dims.sql
+        - file:
+            path: pipelines/medallion/gold/fact_encounter.sql
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual
