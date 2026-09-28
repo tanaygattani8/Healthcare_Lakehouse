@@ -1592,3 +1592,37 @@ would let an emergency that merged with a sterilization stop counting.
 
 The local-day, data-end and planned rules each moved one stay. They are
 right, and small here; they are not free on a real hospital's data.
+
+### D59 — care gaps for 2025: two measures plausible, one is Synthea's rule
+
+`gold.care_gap` has one row per patient, measure and year; `measure_code`
+holds every code the measures use (chosen in D57).
+
+| Measure | In the group | Excluded: age / died / hospice | Eligible | Met | Gaps | Met |
+|---|---:|---:|---:|---:|---:|---:|
+| Blood pressure under 140/90 | 210 | 6 / 5 / 12 | 191 | 133 | 58 | 69.6% |
+| Diabetics with an HbA1c test | 120 | 26 / 3 / 7 | 86 | 69 | 17 | 80.2% |
+| Heart patients on a statin | 158 | 49 / 4 / 10 | 99 | 98 | 1 | **99.0%** |
+
+**Read the statin figure as the generator's rule, not a finding.** Synthea's
+heart-disease module prescribes a statin as part of the treatment it
+simulates, so 99% says how the data was made. The one gap is genuine
+(ischemic heart disease and bypass surgery since 2019, never a statin).
+Blood pressure and HbA1c land where real-world rates do, which is also what
+the generator was tuned to; neither is evidence about care.
+
+**One change to the plan: the group starts with people alive on 1 January.**
+Synthea rarely closes a diagnosis, so the plan's rule ("had the condition
+during the year") put everyone who ever died with one into 2025's group, as
+"excluded: died". That would have been 57, 42 and 48 extra people per
+measure, and an exclusion column counting mostly the long dead. The died
+column now means died *during* 2025.
+
+**The statin rule is checked both ways.** Nystatin counted: 0, but no
+nystatin exists in this data, so that check cannot fail here (D57). A
+"statin" medication the rule misses: 0 of 1,985. That one can fail, and
+would the day a brand not in `measure_code` appears.
+
+Age bands are the HEDIS ones, simplified: diabetes 18-75, blood pressure
+18-85, statins 21-75. The statin band is why 49 heart patients are out on
+age alone.

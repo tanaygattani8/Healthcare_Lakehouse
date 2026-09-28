@@ -88,3 +88,31 @@ FROM healthcare_dev.gold.readmission_events
 WHERE patient_id = (SELECT max_by(patient_id, encounters_in_stay)
                     FROM healthcare_dev.gold.readmission_events)
 ORDER BY stay_no;
+
+-- Step 4. One line per measure. Every column is a count except the rate.
+SELECT measure, measure_year,
+       count(*)                                              AS in_denominator,
+       count_if(excl_age)                                    AS excl_age,
+       count_if(excl_died)                                   AS excl_died,
+       count_if(excl_hospice)                                AS excl_hospice,
+       count_if(NOT (excl_age OR excl_died OR excl_hospice)) AS eligible,
+       count_if(numerator_met AND NOT (excl_age OR excl_died OR excl_hospice)) AS met,
+       count_if(gap)                                         AS gaps,
+       round(100 * count_if(numerator_met AND NOT (excl_age OR excl_died OR excl_hospice))
+             / count_if(NOT (excl_age OR excl_died OR excl_hospice)), 1) AS met_pct
+FROM healthcare_dev.gold.care_gap
+GROUP BY measure, measure_year ORDER BY measure;
+
+-- The statin rule, both ways. Nystatin counted: must be 0 (none in this
+-- data, so this cannot fail here, D57). A 'statin' medication the rule
+-- misses: must be 0, and this one can fail - a brand not in measure_code.
+SELECT count_if(lower(m.source_description) LIKE '%nystatin%' AND hit.code IS NOT NULL)
+                                                        AS nystatin_counted_must_be_0,
+       count_if(lower(m.source_description) NOT LIKE '%nystatin%' AND hit.code IS NULL)
+                                                        AS statin_missed_must_be_0,
+       count_if(hit.code IS NOT NULL)                   AS statin_rows_matched
+FROM healthcare_dev.silver.medication m
+LEFT JOIN healthcare_dev.gold.measure_code hit
+  ON hit.measure = 'statin_therapy' AND hit.role = 'numerator'
+ AND lower(m.source_description) RLIKE concat('\\b', hit.code, '\\b')
+WHERE lower(m.source_description) LIKE '%statin%';
