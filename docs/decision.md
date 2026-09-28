@@ -1626,3 +1626,28 @@ would the day a brand not in `measure_code` appears.
 Age bands are the HEDIS ones, simplified: diabetes 18-75, blood pressure
 18-85, statins 21-75. The statin band is why 49 heart patients are out on
 age alone.
+
+### D60 — patient_360: one row per patient that adds up to the rest of gold
+
+1,148 rows, one per patient, and every total equals the table it summarises:
+187,540 visits and 599,866,684.50 in claims (`fact_encounter`), 201
+readmissions (`readmission_events`). No age is missing; the oldest shows as
+90, meaning 90 or over.
+
+**Visits and cost come from `fact_encounter`, not silver** (a change to the
+plan). Its money is already DECIMAL, so the two tables agree to the cent and
+the PySpark version (step 7) starts from the same numbers.
+
+**What it leaves out, on purpose:** name, address, every identifier number,
+exact birth and death dates (only a capped age and a yes/no for deceased),
+and income and healthcare spend, which D56 found close to unique per person.
+Gender, race, ethnicity and marital status stay; none is a Safe Harbor
+identifier. Visit dates are still exact in `fact_encounter` and
+`readmission_events` (plan decision D-e): **gold is as private as silver,
+and is only ever published as counts.**
+
+After the build the drift check was clean: no tagged column unmasked, and
+`silver.patient` still has all 19 tags. Gold has none. Materialized views do
+not inherit tags, so "gold has no tags" is true by construction today; the
+check is there for the day someone tags a gold column and a schema mask
+starts rewriting it.

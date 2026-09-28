@@ -554,3 +554,6 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
   `sql/readmission_ladder.sql` accounts for the rate change (D58).
 - **Care gaps** (step 4): `measure_code.sql` (every code, one place) then
   `care_gap.sql`, for the last complete year (D59).
+- **One row per patient** (step 5): `patient_360.sql`, built last because it
+  reads `fact_encounter`, `measure_code` and `readmission_events` (D60).
+  Then `sql/governance_check.sql`.

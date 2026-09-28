@@ -46,6 +46,8 @@ resources:
             path: pipelines/medallion/gold/measure_code.sql
         - file:
             path: pipelines/medallion/gold/care_gap.sql
+        - file:
+            path: pipelines/medallion/gold/patient_360.sql
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual

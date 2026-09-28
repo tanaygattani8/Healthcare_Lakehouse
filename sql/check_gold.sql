@@ -116,3 +116,24 @@ LEFT JOIN healthcare_dev.gold.measure_code hit
   ON hit.measure = 'statin_therapy' AND hit.role = 'numerator'
  AND lower(m.source_description) RLIKE concat('\\b', hit.code, '\\b')
 WHERE lower(m.source_description) LIKE '%statin%';
+
+-- Step 5. One row per patient, and it adds up to the other gold tables.
+-- rows = patients = silver_patients = 1,148; encounters_total = fact_rows;
+-- cost_total = fact_cost; readmissions_total = readmission_rows; oldest <= 90.
+SELECT count(*) AS rows, count(DISTINCT patient_id) AS patients,
+       (SELECT count(*) FROM healthcare_dev.silver.patient) AS silver_patients,
+       sum(encounters) AS encounters_total,
+       (SELECT count(*) FROM healthcare_dev.gold.fact_encounter) AS fact_rows,
+       sum(total_claim_cost) AS cost_total,
+       (SELECT sum(total_claim_cost) FROM healthcare_dev.gold.fact_encounter) AS fact_cost,
+       sum(readmissions_30d) AS readmissions_total,
+       (SELECT count_if(is_index_stay AND readmitted_30d)
+          FROM healthcare_dev.gold.readmission_events) AS readmission_rows,
+       max(age_years) AS oldest_must_be_90_or_less,
+       count_if(age_years IS NULL) AS age_unknown_must_be_0
+FROM healthcare_dev.gold.patient_360;
+
+-- Gold must carry no governed tag: nothing in it is a direct identifier. Must be empty.
+SELECT table_name, column_name, tag_name, tag_value
+FROM healthcare_dev.information_schema.column_tags
+WHERE schema_name = 'gold';
