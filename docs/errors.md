@@ -70,6 +70,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E45](#e45) | Scoring: `recall=1.053` — more real dates found than exist | 3b |
 | [E46](#e46) | Name model returns `B`, `ab`, `ara` for one name | 3b |
 | [E47](#e47) | `UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f3c3'` after an MLflow run | 3b |
+| [E48](#e48) | `[INVALID_EXTRACT_BASE_FIELD_TYPE] Can't extract a value from "r.type"` flattening FHIR | 4 |
 
 ---
 
@@ -1399,3 +1400,26 @@ half-finished run was deleted before the four runs were logged again.
 **Lesson.** A library's decoration can fail after its real work, leaving
 state behind. Clean up what the crash left before re-running, or the record
 holds a duplicate.
+
+### E48 — flattening FHIR: a field is a string when it should be a list {#e48}
+
+```
+[INVALID_EXTRACT_BASE_FIELD_TYPE] Can't extract a value from "r.type".
+Need a complex type [STRUCT, ARRAY, MAP] but got "STRING".
+```
+
+**Cause.** The notebook let Spark infer one schema for every resource in the
+bundles. The 25 bundles hold 20 resource types, and the same field name means
+different shapes in each: `type` is a list of codes on Encounter, a single
+code on Claim, text on others. When inferred shapes conflict, Spark does not
+fail; it quietly makes the field a string. The plan's code, and the P6 probe
+that passed, never touched such a field.
+
+**Fix.** Read each resource as raw JSON text (`entry ARRAY<STRUCT<resource:
+STRING>>`), then parse each type with its own small, stated schema via
+`from_json`. `from_json` returns NULL rather than failing when a schema does
+not fit, so the notebook counts rows missing a required field; that must be 0.
+
+**Lesson.** Schema inference over mixed records is a guess, and its failure
+mode is a silent type change, not an error. For nested formats with many
+record types, state the schema per type.

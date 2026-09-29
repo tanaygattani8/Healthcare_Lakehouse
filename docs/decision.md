@@ -1651,3 +1651,31 @@ After the build the drift check was clean: no tagged column unmasked, and
 not inherit tags, so "gold has no tags" is true by construction today; the
 check is there for the day someone tags a gold column and a schema mask
 starts rewriting it.
+
+### D61 — FHIR flattened for the 25 test patients: identical to the CSVs
+
+`notebooks/fhir_flatten.py` turns the 25 test patients' FHIR bundles (316
+MB; the full 12.8 GB would hit the compute cap) into `ops.fhir_encounter`
+and `ops.fhir_condition`, then compares them with silver, both directions:
+
+| | FHIR | Silver | Only in FHIR | Only in silver |
+|---|---:|---:|---:|---:|
+| Encounters: id, patient, start, end | 4,362 | 4,362 | 0 | 0 |
+| Conditions: patient, visit, code, onset, resolved | 2,426 | 2,426 | 0 | 0 |
+
+Two exports of one simulation agreeing is what should happen, so the value is
+in what the comparison forced to be right:
+
+- **Each resource type is parsed with its own stated schema** (errors E48).
+  One schema inferred across 20 resource types turned `type` into text.
+- **Visit times compared as instants.** FHIR writes `-05:00`/`-06:00`, the
+  CSV writes UTC; converted to timestamps they are the same moment.
+- **Diagnosis dates taken as written**, not converted to UTC first, which
+  would move late-evening dates a day (the D50 trap). The plan's code
+  converted; whether that would have shown up here was not tested.
+
+**Three changes to the plan, for privacy.** The bundles are uploaded named
+by patient id: Synthea names each file after the patient, and uploaded as-is
+25 real names would be paths in the lakehouse. Patient resources are never
+parsed; only Encounter and Condition are. The comparison also covers
+`resolved_date`, which the plan left out.

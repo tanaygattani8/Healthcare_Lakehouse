@@ -557,3 +557,6 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
 - **One row per patient** (step 5): `patient_360.sql`, built last because it
   reads `fact_encounter`, `measure_code` and `readmission_events` (D60).
   Then `sql/governance_check.sql`.
+- **FHIR, track A** (step 6): 25 bundles staged to `data/fhir_sample/<patient_id>.json`
+  (gitignored), uploaded to `landing/fhir/`, then `notebooks/fhir_flatten.py`
+  run as a job -> `ops.fhir_encounter`, `ops.fhir_condition` (D61).
