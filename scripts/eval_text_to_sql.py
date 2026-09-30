@@ -48,7 +48,7 @@ def scrub(message: object) -> str:
     if m := re.search(r"\[[A-Z_.]+\]", text):
         return m.group(0)
     first = (text.splitlines() or [""])[0]
-    return re.sub(r"'[^']*'", "'…'", first)[:300]
+    return re.sub(r"""'[^']*'|"[^"]*"|[0-9]+""", "...", first)[:300]
 
 
 def fetch(cur, sql: str) -> tuple[list[tuple] | None, str | None]:
@@ -148,8 +148,10 @@ def main() -> None:
     with dbx.connect() as conn, conn.cursor() as cur:
         # A run cut short by the cap must lose nothing: errored answers are retried
         # (same pattern as scripts/detect_llm.py deleting NULL replies).
-        cur.execute("DELETE FROM healthcare_dev.ops.eval_run "
-                    "WHERE run_id = :run_id AND verdict = 'error'", {"run_id": args.run_id})
+        names = ", ".join(f"'{c}'" for c in contestants)    # from the fixed allow-list
+        cur.execute("DELETE FROM healthcare_dev.ops.eval_run WHERE run_id = :run_id "
+                    f"AND verdict = 'error' AND contestant IN ({names})",
+                    {"run_id": args.run_id})
         cur.execute("SELECT contestant, question_id FROM healthcare_dev.ops.eval_run "
                     "WHERE run_id = :run_id", {"run_id": args.run_id})
         done = {tuple(row) for row in cur.fetchall()}
