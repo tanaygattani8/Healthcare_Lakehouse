@@ -7,15 +7,14 @@ Databricks, so every rule is tested on the laptop.
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
-from itertools import permutations
+from itertools import product
 
 REFUSE = "REFUSE"
 MAX_ROWS = 10_000
 TOLERANCE = 0.005            # half a unit in the 2nd decimal
-# ponytail: columns are matched by trying orders; 8 columns choose 4 is
-# 1,680 tries. Wider answers are compared in their own order only.
-MAX_COLUMNS = 8
+MAX_ASSIGNMENTS = 1_000      # ponytail: capped for many identical columns; upgrade if exhausted
 
 VERDICTS = ("correct", "wrong_result", "sql_error", "blocked", "too_many_rows",
             "answered_unanswerable", "wrongly_refused", "error")
@@ -29,7 +28,10 @@ def _normal(value):
     if isinstance(value, bool):
         return value
     if isinstance(value, int | float | Decimal):
-        return float(value)
+        v = float(value)
+        if math.isnan(v):
+            return "nan"  # sentinel: NaN equals NaN
+        return v
     if isinstance(value, str):
         return value.strip().lower()
     return value
@@ -70,9 +72,40 @@ def results_match(expected: list[tuple], actual: list[tuple], ordered: bool = Fa
     width, have = len(expected[0]), len(actual[0])
     if have < width:
         return False
-    orders = [tuple(range(width))] if have > MAX_COLUMNS else permutations(range(have), width)
-    return any(_rows_equal(expected, [tuple(row[c] for c in cols) for row in actual], ordered)
-               for cols in orders)
+
+    # Find candidate actual columns for each expected column.
+    # A column j is a candidate for expected column i if their values
+    # (as unordered multisets) match within tolerance.
+    candidates = []
+    for exp_col in range(width):
+        exp_values = [tuple([row[exp_col]]) for row in expected]
+        col_candidates = []
+        for act_col in range(have):
+            act_values = [tuple([row[act_col]]) for row in actual]
+            # Check if these single-column lists match as unordered multisets
+            if _rows_equal(exp_values, act_values, ordered=False):
+                col_candidates.append(act_col)
+        if not col_candidates:
+            return False
+        candidates.append(col_candidates)
+
+    # Search for valid assignments: one actual column per expected column,
+    # with no actual column used twice.
+    assignments_tried = 0
+    for assignment in product(*candidates):
+        if len(set(assignment)) != len(assignment):
+            # This assignment uses an actual column twice, skip it
+            continue
+        assignments_tried += 1
+        if assignments_tried > MAX_ASSIGNMENTS:
+            # ponytail: many identical columns multiply choices; upgrade if needed
+            return False
+        # Project actual rows to this assignment
+        projected = [tuple(row[c] for c in assignment) for row in actual]
+        if _rows_equal(expected, projected, ordered):
+            return True
+
+    return False
 
 
 def decide(*, answerable: bool, reply: str | None, gate_problem: str | None = None,

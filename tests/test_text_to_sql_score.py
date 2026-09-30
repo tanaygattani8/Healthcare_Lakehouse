@@ -1,3 +1,4 @@
+import time
 from decimal import Decimal
 
 import pytest
@@ -64,3 +65,21 @@ def test_refusal_is_recognised_loosely():
 ])
 def test_every_verdict(kwargs, verdict):
     assert decide(**kwargs) == verdict
+
+
+def test_answer_column_found_in_a_wide_result():
+    assert results_match([(5,)], [(8, 7, 6, 5, 4, 3, 2, 1, 0)])
+
+
+def test_wide_result_with_many_rows_is_scored_quickly():
+    expected = [(i, i * 2, i * 3, i * 4) for i in range(10_000)]
+    actual = [(0, i * 4, 1, i, 2, i * 3, 3, i * 2) for i in range(10_000)]
+    start = time.perf_counter()
+    result = results_match(expected, actual)
+    elapsed = time.perf_counter() - start
+    assert result is True
+    assert elapsed < 5
+
+
+def test_nan_equals_nan():
+    assert results_match([(float("nan"),)], [(float("nan"),)])
