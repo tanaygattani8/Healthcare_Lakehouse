@@ -6,5 +6,6 @@ pandas==2.2.3
 # *some* pyarrow so pandas can read/write parquet.
 pyarrow
 python-dotenv==1.0.1
+pyyaml==6.0.3
 pytest==8.3.3
 ruff==0.7.4
