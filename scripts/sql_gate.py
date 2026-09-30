@@ -23,14 +23,41 @@ ALLOWED_SCHEMAS = {"healthcare_dev.gold", "healthcare_dev.metrics"}
 WRITE_WORDS = re.compile(
     r"\b(drop|delete|insert|update|merge|alter|create|grant|revoke|truncate|copy)\b",
     re.I)
-BLOCKED_FUNCTIONS = {"read_files", "http_request", "secret", "reflect", "java_method",
-                     "table_changes", "read_kafka", "vector_search", "identifier"}
+# sqlglot types most functions; one it does not recognise is blocked unless listed.
+ALLOWED_UNKNOWN_FUNCTIONS = {"measure", "make_date", "make_timestamp", "date_part"}
+# Dangerous names that sqlglot may type (secret) or that arrive via try_ variants.
+BLOCKED_FUNCTIONS = re.compile(
+    r"(try_)?(secret|reflect|java_method)|ai_.*|read_files|http_request|table_changes"
+    r"|read_kafka|vector_search|identifier|list_secrets|event_log|cloud_files_state"
+    r"|remote_query|read_state|python_exec|call_function|table")
+LATERAL_FUNCTIONS = {"explode", "explode_outer", "posexplode", "posexplode_outer",
+                     "inline", "inline_outer", "stack"}
 
 
-def _function_names(node: exp.Func) -> set[str]:
+def _names(node: exp.Func) -> set[str]:
     if isinstance(node, exp.Anonymous):
         return {node.name.lower()}
     return {node.sql_name().lower(), node.key.lower()}
+
+
+def _function_problem(tree: exp.Expression) -> str | None:
+    # Unqualified names are safe only because the harness runs
+    # USE healthcare_dev.metrics first.
+    for dot in tree.find_all(exp.Dot):
+        if isinstance(dot.expression, exp.Func):
+            return f"blocked function: {dot.sql('databricks')}"
+    for func in tree.find_all(exp.Func):
+        names = _names(func)
+        if isinstance(func, exp.Anonymous) and not names <= ALLOWED_UNKNOWN_FUNCTIONS:
+            return f"blocked function: {func.name.lower()}"
+        for name in names:
+            if BLOCKED_FUNCTIONS.fullmatch(name):
+                return f"blocked function: {name}"
+    for lateral in tree.find_all(exp.Lateral):
+        if not isinstance(lateral.this, exp.Query) and not (
+                isinstance(lateral.this, exp.Func) and _names(lateral.this) & LATERAL_FUNCTIONS):
+            return f"blocked lateral: {lateral.sql('databricks')}"
+    return None
 
 
 def problem(sql: str) -> str | None:
@@ -56,9 +83,4 @@ def problem(sql: str) -> str | None:
             continue
         if f"{table.catalog}.{table.db}".lower() not in ALLOWED_SCHEMAS:
             return f"table outside gold and metrics: {table.sql('databricks')}"
-
-    for func in tree.find_all(exp.Func):
-        for name in _function_names(func):
-            if name.startswith("ai_") or name in BLOCKED_FUNCTIONS:
-                return f"blocked function: {name}"
-    return None
+    return _function_problem(tree)

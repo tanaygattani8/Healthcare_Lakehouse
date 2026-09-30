@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import pytest
 
+from scripts.eval_questions import load
 from scripts.sql_gate import problem
 
 GOLD = "SELECT count(*) FROM healthcare_dev.gold.patient_360"
@@ -77,3 +80,51 @@ def test_blocked_by_parser_allow_list(sql):
 ])
 def test_allowed_by_parser_allow_list(sql):
     assert problem(sql) is None
+
+
+T = "healthcare_dev.gold.t"
+
+
+@pytest.mark.parametrize("sql", [
+    f"SELECT TRY_SECRET('a','b') FROM {T}",
+    f"SELECT try_reflect('a','b') FROM {T}",
+    f"SELECT TRY_REFLECT('a','b') FROM {T}",
+    f"SELECT try_java_method('a','b') FROM {T}",
+    f"SELECT * FROM {T}, LATERAL list_secrets()",
+    f"SELECT * FROM {T}, LATERAL event_log('abc')",
+    f"SELECT * FROM {T}, LATERAL cloud_files_state('/Volumes/x')",
+    f"SELECT * FROM {T}, LATERAL remote_query('conn', database => 'd', query => 'select 1')",
+    f"SELECT * FROM {T}, LATERAL read_state('/x')",
+    f"SELECT * FROM {T}, LATERAL system.ai.python_exec('x')",
+    f"SELECT * FROM {T}, LATERAL silver.fn()",
+    f"SELECT * FROM {T}, LATERAL healthcare_dev.silver.fn()",
+    f"SELECT * FROM {T} LEFT JOIN LATERAL list_secrets() ON true",
+    f"SELECT * FROM {T}, LATERAL event_log(TABLE(silver.x))",
+    f"SELECT * FROM {T}, LATERAL TABLE(silver.x)",
+    f"SELECT TABLE(silver.t) FROM {T}",
+    f"SELECT system.ai.python_exec('x') FROM {T}",
+    f"SELECT system.ai.python_exec('import os') FROM {T}",
+    f"SELECT call_function('secret','a','b') FROM {T}",
+    f"SELECT made_up_fn(1) FROM {T}",
+])
+def test_blocked_functions_and_lateral(sql):
+    assert problem(sql) is not None
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT MEASURE(index_stays) FROM healthcare_dev.metrics.readmission",
+    f"SELECT make_date(2025, 1, 1) AS d FROM {T}",
+    f"SELECT count_if(x), try_divide(a, b), round(c, 2), datediff(d, e), "
+    f"max_by(f, g), date_format(h, 'yyyy') FROM {T}",
+    f"SELECT * FROM {T}, LATERAL explode(array(1, 2)) t",
+    f"SELECT * FROM {T}, LATERAL (SELECT 1) t",
+])
+def test_known_functions_are_allowed(sql):
+    assert problem(sql) is None
+
+
+def test_every_dev_answer_sql_passes_the_gate():
+    questions = [q for q in load(Path("eval/questions_dev.yaml")) if q.answer_sql]
+    assert questions
+    assert [(q.id, problem(q.answer_sql)) for q in questions
+            if problem(q.answer_sql)] == []
