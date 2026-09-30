@@ -41,12 +41,22 @@ SELECT canonical_class, MEASURE(total_claim_cost)
 FROM healthcare_dev.metrics.visits GROUP BY ALL"""
 
 
+def scrub(message: object) -> str:
+    """Error text for storage, with no data values (spec §4): just the Databricks
+    error class if there is one, else the first line with quoted literals masked."""
+    text = str(message)
+    if m := re.search(r"\[[A-Z_.]+\]", text):
+        return m.group(0)
+    first = (text.splitlines() or [""])[0]
+    return re.sub(r"'[^']*'", "'…'", first)[:300]
+
+
 def fetch(cur, sql: str) -> tuple[list[tuple] | None, str | None]:
     try:
         cur.execute(sql)
         return [tuple(row) for row in cur.fetchmany(MAX_ROWS + 1)], None
     except Exception as e:          # the error is the verdict's evidence
-        return None, str(e).splitlines()[0][:500]
+        return None, scrub(e)
 
 
 def gold_schema(cur) -> str:
@@ -86,9 +96,12 @@ def ask_genie(space_id: str, question: str) -> str:
     from datetime import timedelta
 
     from databricks.sdk import WorkspaceClient  # only the genie contestant needs it
+    from databricks.sdk.service.dashboards import MessageStatus
 
     message = WorkspaceClient().genie.start_conversation_and_wait(
         space_id, question, timeout=timedelta(minutes=3))
+    if message.error or message.status in (MessageStatus.FAILED, MessageStatus.CANCELLED):
+        raise RuntimeError(f"genie {message.status}: {message.error}")
     for attachment in message.attachments or []:
         if attachment.query and attachment.query.query:
             return attachment.query.query
@@ -119,9 +132,9 @@ def main() -> None:
     parser.add_argument("--genie-space")
     args = parser.parse_args()
 
-    if not re.fullmatch(rf"{args.set}-\d+", args.run_id):
+    if not re.fullmatch(rf"{args.set}-[0-9]+", args.run_id):
         raise SystemExit(f"--run-id must look like {args.set}-1")
-    contestants = args.contestants.split(",")
+    contestants = list(dict.fromkeys(c.strip() for c in args.contestants.split(",") if c.strip()))
     if unknown := set(contestants) - set(CONTESTANTS):
         raise SystemExit(f"unknown contestants: {unknown}")
     if "genie" in contestants and not args.genie_space:
@@ -133,6 +146,10 @@ def main() -> None:
     questions = load(path)
 
     with dbx.connect() as conn, conn.cursor() as cur:
+        # A run cut short by the cap must lose nothing: errored answers are retried
+        # (same pattern as scripts/detect_llm.py deleting NULL replies).
+        cur.execute("DELETE FROM healthcare_dev.ops.eval_run "
+                    "WHERE run_id = :run_id AND verdict = 'error'", {"run_id": args.run_id})
         cur.execute("SELECT contestant, question_id FROM healthcare_dev.ops.eval_run "
                     "WHERE run_id = :run_id", {"run_id": args.run_id})
         done = {tuple(row) for row in cur.fetchall()}
@@ -143,8 +160,8 @@ def main() -> None:
             contexts["raw"] = (gold_schema(cur), "")
         if "metrics" in contestants:
             contexts["metrics"] = (METRIC_VIEWS.read_text(encoding="utf-8"), METRICS_NOTE)
-        # An unqualified table name can then only mean a metric view, which the
-        # gate allows anyway; never silver, whatever the default schema is.
+        # Defence in depth: the gate already blocks unqualified table names, but
+        # if one slipped through it would resolve to a metric view, never silver.
         cur.execute("USE healthcare_dev.metrics")
 
         for q in questions:
@@ -162,9 +179,14 @@ def main() -> None:
                 try:
                     reply = answer(cur, contestant, q, contexts, args.genie_space)
                 except Exception as e:                 # cap, timeout, malformed reply
-                    error = str(e).splitlines()[0][:500]
+                    error = scrub(e)
+                if not error and not (reply or "").strip():
+                    reply, error = None, "empty reply"
                 if reply and q.answerable and not is_refusal(reply):
-                    gate = problem(reply)
+                    try:
+                        gate = problem(reply)
+                    except Exception as e:             # a gate bug must not end the run
+                        gate = f"gate error: {type(e).__name__}"
                     if not gate:
                         actual, run_error = fetch(cur, reply)
                 verdict = decide(answerable=q.answerable, reply=reply, gate_problem=gate,
