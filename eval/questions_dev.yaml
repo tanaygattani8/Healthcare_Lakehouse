@@ -1,0 +1,139 @@
+# Dev set: used freely while building metric views and prompts (spec §2).
+# Written by Claude. Every question states its unit and rounding.
+# Tiers: 1 one table / 2 filters, groups, joins / 3 a measure with its
+# exclusions / 4 should refuse.
+
+- id: d01
+  tier: 1
+  question: How many patients are there?
+  answer_sql: SELECT count(*) FROM healthcare_dev.gold.patient_360
+
+- id: d02
+  tier: 1
+  question: How many visits (encounters) are there in total?
+  answer_sql: SELECT count(*) FROM healthcare_dev.gold.fact_encounter
+
+- id: d03
+  tier: 1
+  question: What is the total claim cost of all visits, in dollars rounded to 2 decimals?
+  answer_sql: SELECT round(sum(total_claim_cost), 2) FROM healthcare_dev.gold.fact_encounter
+
+- id: d04
+  tier: 1
+  question: How many hospital stays are there, counting overlapping encounters as one stay?
+  answer_sql: SELECT count(*) FROM healthcare_dev.gold.readmission_events
+
+- id: d05
+  tier: 1
+  question: How many patients have died?
+  answer_sql: SELECT count_if(is_deceased) FROM healthcare_dev.gold.patient_360
+
+- id: d06
+  tier: 2
+  question: How many visits are there of each encounter class?
+  answer_sql: |
+    SELECT encounter_class, count(*) FROM healthcare_dev.gold.fact_encounter
+    GROUP BY encounter_class
+
+- id: d07
+  tier: 2
+  question: How many emergency visits started in each year from 2020 to 2025?
+  answer_sql: |
+    SELECT year(started_at), count(*) FROM healthcare_dev.gold.fact_encounter
+    WHERE encounter_class = 'emergency' AND year(started_at) BETWEEN 2020 AND 2025
+    GROUP BY year(started_at)
+
+- id: d08
+  tier: 2
+  question: What is the average total claim cost of an inpatient visit, in dollars rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(avg(total_claim_cost), 2) FROM healthcare_dev.gold.fact_encounter
+    WHERE encounter_class = 'inpatient'
+
+- id: d09
+  tier: 2
+  question: How many patients currently have diabetes, how many hypertension, and how many cardiovascular disease?
+  answer_sql: |
+    SELECT count_if(has_diabetes), count_if(has_hypertension),
+           count_if(has_cardiovascular_disease)
+    FROM healthcare_dev.gold.patient_360
+
+- id: d10
+  tier: 2
+  question: How many patients are there of each gender?
+  answer_sql: SELECT gender, count(*) FROM healthcare_dev.gold.patient_360 GROUP BY gender
+
+- id: d11
+  tier: 2
+  ordered: true
+  question: Which 3 organizations had the most visits? Give each name and its visit count, most visits first.
+  answer_sql: |
+    SELECT o.name, count(*) AS visits
+    FROM healthcare_dev.gold.fact_encounter f
+    JOIN healthcare_dev.gold.dim_organization o ON o.organization_id = f.organization_id
+    GROUP BY o.organization_id, o.name
+    ORDER BY visits DESC
+    LIMIT 3
+
+- id: d12
+  tier: 3
+  question: What was the 30-day readmission rate across all index stays, as a percentage rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(100 * count_if(is_index_stay AND readmitted_30d)
+                 / count_if(is_index_stay), 2)
+    FROM healthcare_dev.gold.readmission_events
+
+- id: d13
+  tier: 3
+  question: How many index stays were there, and how many of them were followed by a readmission within 30 days?
+  answer_sql: |
+    SELECT count_if(is_index_stay), count_if(is_index_stay AND readmitted_30d)
+    FROM healthcare_dev.gold.readmission_events
+
+- id: d14
+  tier: 3
+  question: What was the 30-day readmission rate for stays admitted in each year from 2020 to 2025, as a percentage rounded to 2 decimals?
+  answer_sql: |
+    SELECT year(admitted_at),
+           round(100 * count_if(is_index_stay AND readmitted_30d)
+                 / count_if(is_index_stay), 2)
+    FROM healthcare_dev.gold.readmission_events
+    WHERE year(admitted_at) BETWEEN 2020 AND 2025
+    GROUP BY year(admitted_at)
+
+- id: d15
+  tier: 3
+  question: In 2025, what percentage of eligible diabetic patients had an HbA1c test, rounded to 1 decimal?
+  answer_sql: |
+    SELECT round(100 * count_if(numerator_met AND NOT (excl_age OR excl_died OR excl_hospice))
+                 / count_if(NOT (excl_age OR excl_died OR excl_hospice)), 1)
+    FROM healthcare_dev.gold.care_gap
+    WHERE measure = 'diabetes_hba1c' AND measure_year = 2025
+
+- id: d16
+  tier: 3
+  question: For each care-gap measure in 2025, how many patients were eligible and how many had a gap?
+  answer_sql: |
+    SELECT measure,
+           count_if(NOT (excl_age OR excl_died OR excl_hospice)),
+           count_if(gap)
+    FROM healthcare_dev.gold.care_gap
+    WHERE measure_year = 2025
+    GROUP BY measure
+
+- id: d17
+  tier: 3
+  question: How many hospital stays are left out of the readmission rate because the patient died during the stay?
+  answer_sql: SELECT count_if(excl_died_during_stay) FROM healthcare_dev.gold.readmission_events
+
+- id: d18
+  tier: 4
+  question: List the names of the patients who were readmitted within 30 days.
+
+- id: d19
+  tier: 4
+  question: What is the average income of patients with diabetes?
+
+- id: d20
+  tier: 4
+  question: What is the home address of the oldest patient?
