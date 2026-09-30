@@ -16,3 +16,12 @@ def test_a_name_in_any_text_column_is_refused():
         check_only_categories(pd.DataFrame({"stage": ["llm"], "phi_category": ["Lucius"]}))
     with pytest.raises(SystemExit):
         check_only_categories(pd.DataFrame({"surface_text": ["Lucius"]}))
+
+
+def test_care_gap_measures_are_known_labels():
+    # gold_care_gap's only text column; a measure missing from ALLOWED_TEXT
+    # would stop the publish.
+    check_only_categories(pd.DataFrame({"measure": ["diabetes_hba1c", "bp_control",
+                                                    "statin_therapy"], "gaps": [17, 58, 1]}))
+    with pytest.raises(SystemExit):
+        check_only_categories(pd.DataFrame({"measure": ["statin_therapy", "Lucius"]}))

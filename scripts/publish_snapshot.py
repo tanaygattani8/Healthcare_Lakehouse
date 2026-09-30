@@ -52,7 +52,29 @@ DEID_SNAPSHOTS = {
                    "recall, covered_recall, exact_recall FROM {catalog}.ops.detection_score",
     "deid_kanon": "SELECT version, k, groups, people FROM {catalog}.ops.kanon_spread",
 }
+# Phase 4: gold, which is as private as silver (exact visit dates), so counts
+# per measure only, never a row per patient or per stay.
+GOLD_SNAPSHOTS = {
+    "gold_readmission": (
+        "SELECT count(*) AS stays, "
+        "sum(encounters_in_stay) - count(*) AS encounters_merged, "
+        "count_if(excl_died_during_stay) AS excl_died, "
+        "count_if(excl_short_followup) AS excl_short_followup, "
+        "count_if(excl_discharged_to_hospice) AS excl_hospice, "
+        "count_if(is_index_stay) AS index_stays, "
+        "count_if(is_index_stay AND readmitted_30d) AS readmitted "
+        "FROM {catalog}.gold.readmission_events"),
+    "gold_care_gap": (
+        "SELECT measure, measure_year, count(*) AS in_denominator, "
+        "count_if(excl_age) AS excl_age, count_if(excl_died) AS excl_died, "
+        "count_if(excl_hospice) AS excl_hospice, "
+        "count_if(NOT (excl_age OR excl_died OR excl_hospice)) AS eligible, "
+        "count_if(numerator_met AND NOT (excl_age OR excl_died OR excl_hospice)) AS met, "
+        "count_if(gap) AS gaps "
+        "FROM {catalog}.gold.care_gap GROUP BY measure, measure_year"),
+}
 ALLOWED_TEXT = {
+    "measure": {"diabetes_hba1c", "bp_control", "statin_therapy"},
     "stage": {"roster", "regex", "ner", "llm"},
     "phi_category": {"name", "date", "age", "geography", "other_id", "zip"},
     "version": {"plan", "safe", "released"},
@@ -69,10 +91,10 @@ def check_only_categories(df: pd.DataFrame) -> None:
                              f"{len(unexpected)} value(s) that are not known categories")
 
 
-def fetch_deid(catalog: str) -> dict[str, pd.DataFrame]:
+def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
     frames = {}
     with dbx.connect() as conn, conn.cursor() as cur:
-        for name, query in DEID_SNAPSHOTS.items():
+        for name, query in {**DEID_SNAPSHOTS, **GOLD_SNAPSHOTS}.items():
             cur.execute(query.format(catalog=catalog))
             df = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
             check_only_categories(df)
@@ -94,7 +116,7 @@ def main() -> None:
     print(df.to_string(index=False))
     print(f"Wrote {args.out}")
 
-    for name, frame in fetch_deid(args.catalog).items():
+    for name, frame in fetch_aggregates(args.catalog).items():
         path = args.out.parent / f"{name}.parquet"
         frame.to_parquet(path, index=False)
         print(frame.to_string(index=False))

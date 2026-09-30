@@ -7,9 +7,58 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 3b complete — bronze landed, silver modelled, the pipeline
-triggered from Airflow, PHI columns classified and masked, and clinical notes
-searched for private details by four programs, marked, and de-identified.
+**Status:** Phase 4 complete — bronze landed, silver modelled, the pipeline
+triggered from Airflow, PHI columns classified and masked, clinical notes
+de-identified, and a gold layer of readmissions, care gaps and a patient
+summary, rebuilt in PySpark and proven identical.
+
+## What phase 4 produced
+
+| | |
+|---|---:|
+| Gold tables | 10 |
+| 30-day readmission rate | **17.54%** (201 of 1,146 index stays) |
+| Care-gap measures, 2025 | 3 |
+| SQL vs PySpark, rows that differ | **0** of 1,170 and 0 of 1,148 |
+| FHIR vs CSV, rows that differ | 0 of 4,362 visits and 0 of 2,426 conditions |
+
+**Readmissions are counted per stay, not per encounter.** A hospital
+encounter that starts before the last one ended, or the same day, is the same
+stay. Phase 1's gate counted encounters and got 15.97%. The gold table
+reproduces that exactly when merging is switched off, and
+`sql/readmission_ladder.sql` accounts for every step from there to 17.54%.
+Merging moved the denominator, not the numerator: 121 "admissions" were
+really the middle of a stay, each counted as a patient who never came back.
+Every exclusion (died, too little follow-up, hospice) is its own column,
+never a hidden filter.
+
+**Care gaps describe the generator, not the care.**
+
+| Measure, 2025 | Eligible | Met |
+|---|---:|---:|
+| Blood pressure under 140/90 | 191 | 69.6% |
+| Diabetics with an HbA1c test | 86 | 80.2% |
+| Heart patients on a statin | 99 | 99.0% |
+
+Synthea prescribes a statin as part of the heart treatment it simulates, so
+99% says how the data was made. Seven probes ran before any table was built:
+the heart-disease code the plan assumed had no patients, and the plan's
+single diabetes code would have missed 87 of 166 diabetics.
+
+**Two engines, one answer.** `readmission_events` and `patient_360` were
+built a second time with the PySpark DataFrame API and compared with
+`exceptAll` in both directions: 0 differences. The second version was
+written with knowledge of the first, so it proves the translation more than
+the rules; the rules were proven against the phase 1 gate.
+
+**FHIR, the job SQL is bad at.** The 25 test patients' FHIR bundles were
+flattened in PySpark and matched the CSVs row for row. Inferring one schema
+across 20 resource types silently turned a list into text (errors E48); each
+resource type is now parsed with its own stated schema. Patient resources,
+which hold names, are never parsed.
+
+Gold is as private as silver (exact visit dates), so the app's third page
+gets counts per measure, never rows.
 
 ## What phase 3b produced
 
@@ -185,6 +234,7 @@ there is none.
 | One account, which owns every object | A service principal owns `ops`; analysts get `SELECT` on `silver` and nothing on `ops` | A row in `ops.phi_clearance`. **Separation of duties is impossible here, not merely weak** — there is one principal and it owns everything, so the masks demonstrate a mechanism and enforce nothing against their owner. A second principal is the fix; `REVOKE` is not |
 | One state in the dataset | Row filters segregate by region | The filter works and is verified, but with every patient in Massachusetts it can only be all-rows or no-rows |
 | No GPU, and a daily compute cap | The name model runs on GPU inference | It ran 6.5 hours on a laptop CPU after the cap stopped the Databricks job two hours in. The test set was cut to 25 patients so every program could afford it |
+| A daily compute cap | FHIR flattened for every patient | The FHIR export is 12.8 GB; track A ran on the 25 test patients (316 MB). SQL-vs-PySpark timings are one run at 1,148 patients and are not a ranking |
 | Synthetic notes | Real notes name relatives and clinicians, and write dates many ways | Synthea notes hold first names and ISO dates only, so these scores are a ceiling for real notes, not a forecast |
 
 ## Scope rule

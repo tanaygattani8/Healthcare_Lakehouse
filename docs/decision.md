@@ -1679,3 +1679,66 @@ by patient id: Synthea names each file after the patient, and uploaded as-is
 25 real names would be paths in the lakehouse. Patient resources are never
 parsed; only Encounter and Condition are. The comparison also covers
 `resolved_date`, which the plan left out.
+
+### D62 — two engines, one answer: PySpark matches SQL row for row
+
+`notebooks/gold_pyspark.py` builds `readmission_events` and `patient_360`
+again with the DataFrame API, into `ops.pyspark_*` (never `gold`, so no one
+reads the wrong one). `notebooks/reconcile_gold.py` compares each pair with
+`exceptAll` in both directions and appends the result to
+`ops.reconciliation_results`.
+
+| Table | SQL rows | PySpark rows | Only in SQL | Only in PySpark |
+|---|---:|---:|---:|---:|
+| `readmission_events` | 1,170 | 1,170 | **0** | **0** |
+| `patient_360` | 1,148 | 1,148 | **0** | **0** |
+
+Zero on the first run. **How much that proves, said plainly:** the stay
+numbering was written first, from the plan's skeleton; the rest was written
+by someone who had already written the SQL. That is a second implementation
+of the same rules, not an independent reading of them, so it catches
+translation slips (a wrong join type, a NULL handled differently, a type
+that drifted) better than it catches a rule both sides got wrong. The rules
+themselves were proven against the phase 1 gate (D58).
+
+**What had to be pinned down for the comparison to mean anything**, each of
+which would otherwise have reported differences that were not bugs:
+
+- ties broken by start time then id, in both (D58);
+- money summed from `fact_encounter`'s DECIMAL, so the total is
+  `decimal(24,2)` on both sides (a summed DECIMAL(14,2) widens);
+- column names and types compared, not nullability: a PySpark `count()` is
+  NOT NULL where the pipeline's column is nullable;
+- both sessions in UTC (the notebook reports `Etc/UTC`), with Chicago days
+  made explicitly by `from_utc_timestamp` in both.
+
+**Timings, one run each, 1,148 patients, serverless.** Not a ranking.
+
+| | Pipeline (SQL) | Notebook (PySpark) |
+|---|---:|---:|
+| `readmission_events` | ~15 s for the table; 99 s for the whole update | 75.1 s |
+| `patient_360` | ~9 s for the table; 83 s for the whole update | 19.4 s |
+
+The two columns do not measure the same thing. The pipeline's per-table time
+excludes starting the update; the notebook's includes its first reads and
+writing a Delta table, and its job took 2.3 minutes with start-up. At this
+size start-up dominates both. The spec asked for main-tier timings too;
+those were not run (plan decision D-d: a day's quota).
+
+The query plans stored in `ops.reconciliation_results` are of *reading* the
+two finished tables, so they are table scans on both sides and say nothing
+about how each engine built them. Comparing build plans would mean capturing
+them inside the pipeline and the notebook; not done.
+
+### D63 — the gold numbers in the app: counts per measure only
+
+`scripts/publish_snapshot.py` adds `GOLD_SNAPSHOTS`: one row of readmission
+counts and one row per care-gap measure, written to
+`snapshots/gold_readmission.parquet` and `gold_care_gap.parquet`. The guard
+(`check_only_categories`) now also knows the three measure names and refuses
+any other text; a test proves it refuses a name. `app/pages/3_Quality_measures.py`
+shows the rate, every exclusion, and the three care-gap rates with the
+caveat that they describe Synthea's rules, not care.
+
+Gold holds exact visit dates (plan decision D-e), so nothing per patient or
+per stay leaves it: the snapshot is aggregates over the whole population.

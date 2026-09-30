@@ -560,3 +560,19 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
 - **FHIR, track A** (step 6): 25 bundles staged to `data/fhir_sample/<patient_id>.json`
   (gitignored), uploaded to `landing/fhir/`, then `notebooks/fhir_flatten.py`
   run as a job -> `ops.fhir_encounter`, `ops.fhir_condition` (D61).
+- **PySpark, track B** (step 7): `notebooks/gold_pyspark.py` as a job ->
+  `ops.pyspark_readmission_events`, `ops.pyspark_patient_360`. Reads
+  `gold.planned_reason`, `gold.fact_encounter` and `gold.measure_code`, so it
+  runs after the pipeline has built them.
+- **Reconciliation** (step 8): `sql/reconciliation_results.sql` once, then
+  `notebooks/reconcile_gold.py` as a job, appending to
+  `ops.reconciliation_results` (D62).
+- **App** (step 9): `python -m scripts.publish_snapshot` also writes
+  `snapshots/gold_readmission.parquet` and `gold_care_gap.parquet`, read by
+  `app/pages/3_Quality_measures.py` (D63).
+
+**Entry points for gold, in order:** `databricks bundle deploy -t dev`, then
+`pipelines start-update --json '{"refresh_selection": [...]}'` table by table
+(dims, fact_encounter, planned_reason + readmission_events, measure_code +
+care_gap, patient_360), then `sql/check_gold.sql`, then the two notebooks,
+then `scripts.publish_snapshot`.
