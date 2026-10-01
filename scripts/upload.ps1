@@ -1,6 +1,9 @@
 param(
     [string]$Catalog = "healthcare_dev",
-    [string]$OutputDir = "synthea/output"
+    [string]$OutputDir = "synthea/output",
+    # A later batch lands beside the first (encounters/encounters_b2.csv), so
+    # Auto Loader reads it as a new file and batch 1 is never overwritten (D65).
+    [string]$Suffix = ""
 )
 
 # Keep in sync with scripts/entities.py. An entity missing here silently
@@ -26,8 +29,9 @@ foreach ($entity in $entities) {
     databricks fs mkdir "$dest"
     if ($LASTEXITCODE -ne 0) { throw "could not create $dest" }
 
-    Write-Host "Uploading $entity..."
-    databricks fs cp $source "$dest/$entity.csv" --overwrite
+    $file = if ($Suffix) { "${entity}_$Suffix.csv" } else { "$entity.csv" }
+    Write-Host "Uploading $entity as $file..."
+    databricks fs cp $source "$dest/$file" --overwrite
     # Without this, twelve failed uploads still end with "Done."
     if ($LASTEXITCODE -ne 0) { throw "upload failed for $entity" }
 }

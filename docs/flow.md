@@ -425,6 +425,12 @@ docker run
 Reproduces the recorded dataset to 0.004% (132 rows of 3.28 million, all near
 the cutoff); bytes differ by line endings — D35.
 
+**Batch 2 (D65):** the same jar, `-p 10000 -s 67890 -cs 12345`, CSV only, into
+`synthea/output_b2/`. Then `python -m scripts.new_reference_rows synthea/output
+synthea/output_b2` (only new hospitals, doctors and payers), then
+`upload.ps1 -OutputDir synthea/output_b2 -Suffix b2`, then one normal pipeline
+update. Command in `synthea/README.md`.
+
 ### Cycle 11 — 2026-09-18 · Phase 2b · orchestration and reproducibility
 
 - **Two new entry points** as above; the second is the first entry point that

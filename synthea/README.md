@@ -73,6 +73,32 @@ readmission figure.
 | CSV files | 18 |
 | Inpatient encounters | 1,292 |
 
+## Batch 2 — ~10,000 more patients (decision.md D65)
+
+After D64 there were 17 readmissions, too few to model. Batch 2 lands
+**beside** batch 1, which is never regenerated:
+
+```
+mkdir -p synthea/output_b2
+java -Duser.timezone=America/Chicago -Xmx6g -jar synthea/synthea-with-dependencies.jar \
+  -c synthea/synthea.properties --exporter.baseDirectory=./synthea/output_b2/ \
+  --exporter.fhir.export=false --exporter.clinical_note.export=false \
+  --exporter.csv.excluded_files=claims.csv,claims_transactions.csv,devices.csv,imaging_studies.csv,supplies.csv,payer_transitions.csv,patient_expenses.csv \
+  -p 10000 -s 67890 -cs 12345 -r 20260101 -e 20260808 Massachusetts
+```
+
+- **A new population seed** (`-s 67890`) gives new people: none of their ids
+  is shared with batch 1.
+- **The same clinician seed** gives the same doctors: 822 of the 1,143
+  hospitals and doctors already exist in batch 1.
+  `scripts/new_reference_rows.py` keeps only the 321 new ones, so gold has
+  one row per id.
+- **CSV only, and only the uploaded files.** FHIR at this size would be
+  about 120 GB, and notes are not needed: phase 3b reads batch 1 only.
+- Result: `Records: total=11432, alive=10000, dead=1432`, 5.9 GB of CSV,
+  32 minutes on the laptop.
+- Uploaded with `scripts/upload.ps1 -OutputDir synthea/output_b2 -Suffix b2`.
+
 ## Overridden defaults, and why each matters
 
 | Property | Default | Set to | Consequence if left at default |

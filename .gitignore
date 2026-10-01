@@ -1,5 +1,6 @@
 # Synthea output — never committed
 synthea/output/
+synthea/output_b2/
 synthea/*.jar
 
 # Secrets

@@ -1793,3 +1793,61 @@ least 10 different readmitted patients on the higher side of a split) can
 hardly be met, so NO-GO is the likely result, and the spec already says
 what phase 6 does then. Page 3 and the README still show 17.54% until the
 phase 5 snapshot and write-up replace them.
+
+### D65 — a second Synthea batch: 11,432 more patients beside the first
+
+After D64 there were 17 readmissions from 17 people. That is too few for
+phase 5's go/no-go rule (at least 10 readmitted patients on the higher side
+of a split) or for a phase 6 model. The number of events grows with the
+number of patients, so a second population was generated and landed
+**beside** batch 1. Batch 1 is never regenerated.
+
+**How.**
+- **Seeds:** `-p 10000 -s 67890 -cs 12345 -r 20260101 -e 20260808 Massachusetts`.
+  The new population seed gives new people. The same clinician seed gives
+  the same doctors. The same dates keep both batches on one calendar.
+- **CSV only, and only the 12 uploaded files:** no FHIR (about 120 GB at
+  this size) and no notes.
+- **Run:** 32 minutes on the laptop, 5.9 GB.
+- **Spike first** (20 and 244 patients):
+  - patient ids never collide;
+  - payers are all shared;
+  - 78 of 85 hospitals and doctors are shared.
+- **Reference rows:** `scripts/new_reference_rows.py` keeps only the ids
+  batch 1 lacks (321 hospitals, 321 doctors, 0 payers), so a shared id
+  keeps batch 1's row. Every batch 2 visit's hospital, doctor and payer
+  exists in one batch or the other.
+- **Upload:** `upload.ps1 -Suffix b2` lands `<entity>/<entity>_b2.csv` next
+  to batch 1's file. Auto Loader reads only the new files, so one normal
+  update added them, with no full refresh: 8 minutes.
+- **Telling the batches apart:** `_batch_id` is `manual` for both, because
+  the pipeline config is per bundle, not per update. `_source_file` names
+  the `_b2` file instead.
+
+**What stays batch 1 only:** phase 3b's notes, held-out patients and
+detection scores (`detect_llm.py` reads only `ops.heldout_patient`), and the
+25-patient FHIR sample (D61). `silver.note_chunk` covers batch 1's 1,148
+patients.
+
+**Before and after.** Every check in `check_gold.sql` passes on both
+batches: no unknown or duplicate reference ids, gold equals silver, and
+every `_must_be_0` is 0. SQL and PySpark reconcile with 0 differences
+(14,313 stays, 12,580 patients).
+
+| | Batch 1 | Both batches |
+|---|---:|---:|
+| Patients | 1,148 | 12,580 |
+| Visits | 187,540 | 2,074,520 |
+| Hospital stays | 1,170 | 14,313 |
+| Excluded: cancer treatment | 280 | 3,402 |
+| Index stays | 866 | 10,724 |
+| 30-day readmissions | 17 (17 patients) | **173 (158 patients, at most 3 each)** |
+| Readmission rate | 1.96% | 1.61% |
+| BP under 140/90 | 69.6% | 67.0% |
+| Diabetics with an HbA1c test | 80.2% | 82.9% |
+| Heart patients on a statin | 99.0% | 97.7% |
+
+The ladder runs on both batches. The gate's rule gives 12.31%, and v7, the
+table, gives 1.61%. **The decision.md entries before D65 give batch 1
+numbers**; they are not rewritten, because each recorded what was true when
+it was made.
