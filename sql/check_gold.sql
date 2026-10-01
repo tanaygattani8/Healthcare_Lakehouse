@@ -71,6 +71,7 @@ SELECT count(*)                                         AS stays,
        count_if(excl_died_during_stay)                  AS excl_died,
        count_if(excl_short_followup)                    AS excl_short_followup,
        count_if(excl_discharged_to_hospice)             AS excl_hospice,
+       count_if(excl_cancer_treatment)                  AS excl_cancer_treatment,
        count_if(is_index_stay IS NULL)                  AS index_unknown_must_be_0,
        count_if(is_index_stay)                          AS index_stays,
        count_if(is_index_stay AND readmitted_30d)       AS readmitted,
@@ -137,3 +138,32 @@ FROM healthcare_dev.gold.patient_360;
 SELECT table_name, column_name, tag_name, tag_value
 FROM healthcare_dev.information_schema.column_tags
 WHERE schema_name = 'gold';
+
+-- Phase 5. readmission_signals: one row per index stay, agreeing with
+-- readmission_events. Expect rows = keys = 866, readmitted = 17 (D64), and 0 in
+-- every *_must_be_0 column.
+SELECT count(*)                                                    AS rows,
+       count(DISTINCT patient_id, stay_no)                         AS keys,
+       count_if(outcome_readmitted_30d)                            AS readmitted,
+       count_if(outcome_readmitted_30d <> (outcome_return_stay_cost IS NOT NULL))
+                                                                   AS return_cost_mismatch_must_be_0,
+       count_if(post_followup_7d AND outcome_days_to_return = 1)   AS followup_after_return_must_be_0,
+       count_if(age_at_admit IS NULL OR age_at_admit > 90)         AS age_bad_must_be_0,
+       count_if(stay_claim_cost IS NULL)                           AS cost_missing_must_be_0
+FROM healthcare_dev.gold.readmission_signals;
+
+-- What the story splits on. Six rows: five names and "other". Copy the five
+-- names into Task 10 (the snapshot guard).
+SELECT admit_reason_group, count(*) AS index_stays,
+       count_if(outcome_readmitted_30d) AS readmitted
+FROM healthcare_dev.gold.readmission_signals
+GROUP BY ALL ORDER BY index_stays DESC;
+
+-- The two medians, and how many stays sit on each side of them.
+SELECT median(conditions_at_admit) AS conditions_median,
+       count_if(above_median_conditions) AS above_conditions,
+       median(length_of_stay_days) AS length_of_stay_median,
+       count_if(above_median_length_of_stay) AS above_length_of_stay,
+       count_if(post_followup_7d) AS followed_up_7d,
+       count_if(prior_stays_12m >= 1) AS had_prior_stay
+FROM healthcare_dev.gold.readmission_signals;

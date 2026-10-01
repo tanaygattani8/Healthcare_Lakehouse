@@ -1423,3 +1423,29 @@ not fit, so the notebook counts rows missing a required field; that must be 0.
 **Lesson.** Schema inference over mixed records is a guess, and its failure
 mode is a silent type change, not an error. For nested formats with many
 record types, state the schema per type.
+
+### E49 — asking Genie from a script: "No API found" {#e49}
+```
+databricks.sdk.errors.platform.NotFound: No API found for 'POST /genie/spaces/01f1...
+```
+
+**Cause.** The space id was copied from the browser address bar with its
+query string, `01f1...60df?o=7474655569061305`. `?o=` is the workspace
+number, not part of the id, and it ends up inside the request path.
+
+**Fix.** Pass only the part between `/rooms/` and `?`.
+
+### E50 — rerunning the PySpark gold notebook: schema mismatch {#e50}
+```
+[DELTA_METADATA_MISMATCH] A metadata mismatch was detected when writing to the Delta table.
+- A schema mismatch detected when writing to the Delta table
+```
+
+**Cause.** D64 added `excl_cancer_treatment` to `readmission_events`, so the
+PySpark copy had one column more than `ops.pyspark_readmission_events`.
+`mode("overwrite")` replaces the rows but keeps the existing schema, so an
+extra column is refused.
+
+**Fix.** `.option("overwriteSchema", "true")` on that write. The table is
+rebuilt whole every run, so replacing its schema loses nothing.
+`mergeSchema` would have kept dropped columns forever.

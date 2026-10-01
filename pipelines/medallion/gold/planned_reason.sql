@@ -1,7 +1,8 @@
 -- Admission reasons that mean a scheduled stay, not a relapse (probe P3,
 -- decision.md D57). A readmission for one of these does not count.
 -- Cancer stays are NOT here: the reason cannot tell a chemotherapy stay
--- (planned) from a complication (unplanned), so they count as unplanned.
+-- (planned) from a complication (unplanned). The procedure can, so cancer
+-- treatment is in planned_procedure instead (D64).
 -- Sleep disorder is assumed to be an overnight sleep study.
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.planned_reason

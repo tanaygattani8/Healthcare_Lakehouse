@@ -41,6 +41,8 @@ resources:
         - file:
             path: pipelines/medallion/gold/planned_reason.sql
         - file:
+            path: pipelines/medallion/gold/planned_procedure.sql
+        - file:
             path: pipelines/medallion/gold/readmission_events.sql
         - file:
             path: pipelines/medallion/gold/measure_code.sql
@@ -48,6 +50,8 @@ resources:
             path: pipelines/medallion/gold/care_gap.sql
         - file:
             path: pipelines/medallion/gold/patient_360.sql
+        - file:
+            path: pipelines/medallion/gold/readmission_signals.sql
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual

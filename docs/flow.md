@@ -573,6 +573,6 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
 
 **Entry points for gold, in order:** `databricks bundle deploy -t dev`, then
 `pipelines start-update --json '{"refresh_selection": [...]}'` table by table
-(dims, fact_encounter, planned_reason + readmission_events, measure_code +
-care_gap, patient_360), then `sql/check_gold.sql`, then the two notebooks,
+(dims, fact_encounter, planned_reason + planned_procedure + readmission_events,
+measure_code + care_gap, patient_360), then `sql/check_gold.sql`, then the two notebooks,
 then `scripts.publish_snapshot`.

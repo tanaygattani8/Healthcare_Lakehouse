@@ -1553,6 +1553,8 @@ have two decimal places.
 
 ### D58 — readmissions: 15.97% became 17.54%, and each change accounted for
 
+> **Amended by D64:** chemotherapy stays are planned and not index stays; the table is now 17 of 866 = 1.96%.
+
 `gold.readmission_events` has one row per hospital **stay**, not per
 encounter, with every exclusion as its own column. Proven in four checks:
 
@@ -1742,3 +1744,52 @@ caveat that they describe Synthea's rules, not care.
 
 Gold holds exact visit dates (plan decision D-e), so nothing per patient or
 per stay leaves it: the snapshot is aggregates over the whole population.
+
+### D64 — readmissions, amended: chemotherapy is planned, so 17.54% became 1.96%
+
+Phase 5's first look at `gold.readmission_signals` found that **184 of the
+201 readmissions belonged to 10 lung cancer patients**. Every inpatient
+lung cancer encounter is "Combined chemotherapy and radiation therapy"
+(1,599 procedures), and those patients came back every 23-27 days (median
+25). Synthea's lung cancer module schedules the cycles. They were scheduled
+treatment, not relapses.
+
+D58's planned rule could not see them: it reads the reason a stay began, and
+`planned_reason.sql` already said cancer was left out because the reason
+cannot tell chemotherapy from a complication. The procedure can. CMS treats
+maintenance chemotherapy as always planned, and its readmission measures
+also leave cancer-treatment stays out of the index stays.
+
+**The change** (user's choice, both parts):
+- `gold.planned_procedure` holds the codes: `703423002` (combined chemo and
+  radiation) and `367336001` (chemotherapy). It is the one place they are
+  defined, like `measure_code`.
+- A stay that includes one of those procedures is **planned**, whatever its
+  admit reason. A return for cancer treatment is not a readmission.
+- The same stay is **not an index stay**, through a new exclusion column,
+  `excl_cancer_treatment`. Every exclusion stays visible.
+
+**The ladder** (`sql/readmission_ladder.sql`) gains two steps, each switched
+on alone:
+
+| Step | Index stays | Readmitted | Rate |
+|---|---:|---:|---:|
+| v5 · D58's table | 1,146 | 201 | 17.54% |
+| v6 + a cancer-treatment stay is planned | 1,146 | 17 | 1.48% |
+| v7 + it cannot start a window either = **the table** | **866** | **17** | **1.96%** |
+
+v7 excludes 280 stays. The 17 readmissions belong to **17 different
+patients**, one each.
+
+**Both engines agree.** `notebooks/gold_pyspark.py` got the same rule, and
+`reconcile_gold.py` reports 0 rows only in SQL and 0 only in PySpark, for
+`readmission_events` (1,170) and `patient_360` (1,148). `check_gold.sql`
+check C now shows the new exclusion. `patient_360.readmissions_30d` sums to
+17.
+
+**What it does to phase 5.** The story's first chapter becomes "smaller
+than it looked". With 17 readmissions from 17 people, spec §5's rule (at
+least 10 different readmitted patients on the higher side of a split) can
+hardly be met, so NO-GO is the likely result, and the spec already says
+what phase 6 does then. Page 3 and the README still show 17.54% until the
+phase 5 snapshot and write-up replace them.

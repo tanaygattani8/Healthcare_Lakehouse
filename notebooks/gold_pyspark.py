@@ -20,6 +20,8 @@ def local_day(c):
 enc = spark.table(f"{C}.silver.encounter")
 patient = spark.table(f"{C}.silver.patient")
 planned = spark.table(f"{C}.gold.planned_reason")
+procedure = spark.table(f"{C}.silver.procedure")
+planned_procedure = spark.table(f"{C}.gold.planned_procedure")
 
 # ---- readmission_events ------------------------------------------------------
 started = time.time()
@@ -32,6 +34,12 @@ before = (Window.partitionBy("patient_id").orderBy("started_at", "encounter_id")
                 .rowsBetween(Window.unboundedPreceding, -1))
 upto = (Window.partitionBy("patient_id").orderBy("started_at", "encounter_id")
               .rowsBetween(Window.unboundedPreceding, 0))
+
+# Encounters with a procedure that is always planned: cancer treatment (D64).
+planned_encounters = (procedure.join(planned_procedure, F.col("source_code") == F.col("code"))
+                               .select(F.col("encounter_id").alias("planned_encounter_id"))
+                               .distinct())
+inp = inp.join(planned_encounters, F.col("encounter_id") == F.col("planned_encounter_id"), "left")
 
 # A new stay begins only if this encounter starts on a later day than every
 # earlier one ended: max over all earlier rows, not just the one before.
@@ -50,13 +58,16 @@ stays = (inp.groupBy("patient_id", "stay_no")
                  F.max("stopped_at").alias("discharged_at"),
                  F.min("start_day").alias("admit_day"),
                  F.max("stop_day").alias("discharge_day"),
-                 F.min_by("reason_description", first).alias("admit_reason")))
+                 F.min_by("reason_description", first).alias("admit_reason"),
+                 F.max(F.col("planned_encounter_id").isNotNull()).alias("cancer_treatment")))
 
-# Planned follows the reason the stay began with.
+# Planned follows the reason the stay began with, except cancer treatment,
+# which is planned wherever it falls (D64).
 stays = (stays.join(planned.withColumnRenamed("reason_description", "admit_reason")
                            .withColumn("is_planned", F.lit(True)),
                     "admit_reason", "left")
-              .withColumn("is_planned", F.coalesce("is_planned", F.lit(False))))
+              .withColumn("is_planned",
+                          F.coalesce("is_planned", F.lit(False)) | F.col("cancer_treatment")))
 
 # The data ends at the last visit of any kind, as a Chicago day.
 last_day = enc.agg(local_day(F.max("started_at")).alias("last_day"))
@@ -83,6 +94,7 @@ to_hospice = (stays.join(hospice, "patient_id")
 died = F.coalesce(F.col("death_date") <= F.col("discharge_day"), F.lit(False))
 short = F.datediff("last_day", "discharge_day") < 30
 in_hospice = F.col("to_hospice").isNotNull()
+cancer = F.col("cancer_treatment")
 
 readmission_events = (
     stays.withColumn("days_to_next_stay", days_to_next)
@@ -95,12 +107,16 @@ readmission_events = (
                  died.alias("excl_died_during_stay"),
                  short.alias("excl_short_followup"),
                  in_hospice.alias("excl_discharged_to_hospice"),
+                 cancer.alias("excl_cancer_treatment"),
                  "days_to_next_stay",
                  "days_to_unplanned_return",
                  F.col("days_to_unplanned_return").isNotNull().alias("readmitted_30d"),
-                 (~(died | short | in_hospice)).alias("is_index_stay")))
+                 (~(died | short | in_hospice | cancer)).alias("is_index_stay")))
 
-readmission_events.write.mode("overwrite").saveAsTable(f"{C}.ops.pyspark_readmission_events")
+# overwriteSchema: rebuilt whole every run, so a rule that adds a column
+# (D64's excl_cancer_treatment) replaces the old schema instead of failing.
+(readmission_events.write.mode("overwrite").option("overwriteSchema", "true")
+                   .saveAsTable(f"{C}.ops.pyspark_readmission_events"))
 seconds_readmission = time.time() - started
 
 # ---- patient_360 --------------------------------------------------------------
