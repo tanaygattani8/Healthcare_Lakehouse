@@ -1879,3 +1879,57 @@ levels, and prior stays `1` and `2+`. The 0 vs 1+ prior-stay comparison
 survives, as the `0` row's rest (1,020 stays, 34 readmitted). Hiding the
 numbers of low-rate levels is the price. The data is synthetic, but the
 project says it suppresses small cells, and now it does.
+
+### D67 — text-to-SQL on the dev set: the metrics note rewritten; no semantic search; no gate change
+
+**dev-1** (`raw`, `metrics`; 20 dev questions each): raw 10 of 20, metrics
+9 of 20. Every failure was sorted by cause:
+
+| Cause | raw | metrics |
+|---|---:|---:|
+| wrong code | 0 | 0 |
+| wrong table or column | 7 | 0 |
+| MEASURE() misuse | 0 | 4 |
+| every dimension selected when one number was asked | 0 | 3 |
+| grouped where a filter was asked | 0 | 2 |
+| should-refuse answered | 2 | 1 |
+| other (summed a boolean; `other` ranked as an admit reason) | 1 | 1 |
+| false block | 0 | 0 |
+
+**Semantic search over codes is not built** (spec §8): "wrong code" was 0
+of raw's 10 failures and 0 of metrics' 11, against the bar of a third. The
+questions are about prepared columns, never about raw codes.
+
+**The gate is unchanged.** Its one block (`avg_if`) was right: no such
+function exists on Databricks.
+
+**The metrics note was rewritten** (Task 7 Step 7). The old note said
+"Select dimensions by name ... and GROUP BY the dimensions", which reads as
+"always select them", and never said what `MEASURE()` accepts. The model
+did exactly that: every dimension in the SELECT (1,000+ rows for a single
+total), and `MEASURE(ROUND(...))`, `MEASURE(<expression>)`,
+`SUM(MEASURE(...))`. The new note says `MEASURE()` takes only a measure's
+name, a dimension is selected only to break a number down, and a filter is
+a `WHERE`. The view file's own header had the same wording, and an example
+on the readmission view; it now points at the note. The raw prompt was not
+changed: its failures were the model ignoring a clear table comment
+(`readmission_signals` is "One row per index stay", yet it added
+`is_index_stay`, a column of another table, six times).
+
+**dev-2**, after the change: metrics **9 → 16**, raw **10 → 12**. Raw's
+prompt did not change, so its +2 is run-to-run noise even at temperature 0
+(d02 and d09 flipped). That noise is why Task 9 runs the test set twice,
+and it puts metrics' +7 well clear of chance.
+
+**Metrics' four dev-2 failures are limits of the views, not of the note:**
+- d04: answers 2030 instead of refusing.
+- d11: the view has only `admit_reason_group`, so `other` ranks as a
+  reason (by design: the top five are computed in gold, plan P-d).
+- d15: "readmitted vs not" needs the outcome as a dimension, and the
+  readmission view has it only inside measures.
+- d17: "0 vs at least 1 prior stays" as two columns needs two filters in
+  one query, which a metric view does not do in one SELECT.
+
+The views were not changed to fix these. They were built from the spec
+before any run, and widening them to fit dev failures is what the dev set
+must not be used for twice.

@@ -1,10 +1,8 @@
 -- Phase 5 metrics layer: every number in the readmission story, defined
 -- once. Built after the test questions were frozen
 -- (eval/questions_test.sha256), from spec §2-§5. The metrics contestant
--- reads this file. To query: dimensions by name, every measure wrapped in
--- MEASURE(), then GROUP BY the dimensions, for example
---   SELECT age_band, MEASURE(readmission_rate_pct)
---   FROM healthcare_dev.metrics.readmission GROUP BY ALL
+-- reads this file, with METRICS_NOTE in scripts/eval_text_to_sql.py, which
+-- says how to query a metric view.
 
 CREATE SCHEMA IF NOT EXISTS healthcare_dev.metrics
 COMMENT "Phase 5: every number in the readmission story, defined once, as metric views.";
