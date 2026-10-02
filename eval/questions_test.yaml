@@ -1,0 +1,151 @@
+# Chapter 1. How big is the problem?
+- id: t01
+  tier: 1
+  question: How many hospital stays were excluded from being index stays because the patient died during the stay, as a whole number?
+  answer_sql: |
+    SELECT count_if(excl_died_during_stay)
+    FROM healthcare_dev.gold.readmission_events
+
+- id: t02
+  tier: 1
+  question: How many distinct patients have at least one index stay in the dataset, as a whole number?
+  answer_sql: |
+    SELECT count(DISTINCT patient_id)
+    FROM healthcare_dev.gold.readmission_signals
+
+- id: t03
+  tier: 3
+  question: What is the 30-day readmission rate over index stays for stays admitted in the year 2025, as a percentage rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(100 * count_if(outcome_readmitted_30d) / count(*), 2)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE admit_year = 2025
+
+- id: t04
+  tier: 4
+  question: What is the phone number of the patient who had the highest number of index stays?
+
+# Chapter 2. Who comes back?
+- id: t05
+  tier: 2
+  question: How many index stays belong to female patients, as a whole number?
+  answer_sql: |
+    SELECT count(*)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE gender = 'F'
+
+- id: t06
+  tier: 3
+  question: What is the 30-day readmission rate over index stays for patients who had hypertension on the day of admission, as a percentage rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(100 * count_if(outcome_readmitted_30d) / count(*), 2)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE has_hypertension = true
+
+- id: t07
+  tier: 3
+  question: What is the 30-day readmission rate over index stays for patients in the '80+' age band, as a percentage rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(100 * count_if(outcome_readmitted_30d) / count(*), 2)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE age_band = '80+'
+
+- id: t08
+  tier: 4
+  question: What is the email address of the oldest patient admitted for an index stay?
+
+# Chapter 3. What happened around the stay?
+- id: t09
+  tier: 2
+  ordered: true
+  question: What are the 3 most common admission reason groups for index stays, returning the group name and stay count as two columns, most common first?
+  answer_sql: |
+    SELECT admit_reason_group, count(*) AS stay_count
+    FROM healthcare_dev.gold.readmission_signals
+    GROUP BY admit_reason_group
+    ORDER BY stay_count DESC
+    LIMIT 3
+
+- id: t10
+  tier: 3
+  question: What is the 30-day readmission rate over index stays that were planned admissions, as a percentage rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(100 * count_if(outcome_readmitted_30d) / count(*), 2)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE is_planned = true
+
+- id: t11
+  tier: 3
+  question: What is the 30-day readmission rate over index stays with a length of stay longer than 7 days, as a percentage rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(100 * count_if(outcome_readmitted_30d) / count(*), 2)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE length_of_stay_days > 7
+
+- id: t12
+  tier: 2
+  question: How many index stays had 3 or more emergency room visits in the 12 months before admission, as a whole number?
+  answer_sql: |
+    SELECT count(*)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE prior_emergency_12m >= 3
+
+# Chapter 4. What does it cost?
+- id: t13
+  tier: 1
+  question: What is the average claim cost across all index stays, in dollars rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(avg(stay_claim_cost), 2)
+    FROM healthcare_dev.gold.readmission_signals
+
+- id: t14
+  tier: 2
+  question: What is the total claim cost of index stays for patients in the '65-79' age band, in dollars rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(sum(stay_claim_cost), 2)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE age_band = '65-79'
+
+- id: t15
+  tier: 2
+  question: What is the average claim cost of a return stay among index stays that were readmitted within 30 days, in dollars rounded to 2 decimals?
+  answer_sql: |
+    SELECT round(avg(outcome_return_stay_cost), 2)
+    FROM healthcare_dev.gold.readmission_signals
+    WHERE outcome_readmitted_30d = true
+
+- id: t16
+  tier: 4
+  question: What is the health insurance provider name for the patient with the highest stay claim cost?
+
+# Chapter 5. Could we see it coming?
+- id: t17
+  tier: 3
+  question: What is the 30-day readmission rate for index stays with a length of stay above the median, and for those at or below the median, returning the above-median rate and at-or-below-median rate as two columns as percentages rounded to 2 decimals?
+  answer_sql: |
+    SELECT
+      round(100 * count_if(outcome_readmitted_30d AND above_median_length_of_stay) / count_if(above_median_length_of_stay), 2) AS above_median_rate,
+      round(100 * count_if(outcome_readmitted_30d AND NOT above_median_length_of_stay) / count_if(NOT above_median_length_of_stay), 2) AS below_or_equal_median_rate
+    FROM healthcare_dev.gold.readmission_signals
+
+- id: t18
+  tier: 3
+  question: What is the 30-day readmission rate for index stays of patients with cardiovascular disease open on admission, and for those without, returning the rates for patients with and without cardiovascular disease as two columns as percentages rounded to 2 decimals?
+  answer_sql: |
+    SELECT
+      round(100 * count_if(outcome_readmitted_30d AND has_cardiovascular_disease) / count_if(has_cardiovascular_disease), 2) AS with_cvd_rate,
+      round(100 * count_if(outcome_readmitted_30d AND NOT has_cardiovascular_disease) / count_if(NOT has_cardiovascular_disease), 2) AS without_cvd_rate
+    FROM healthcare_dev.gold.readmission_signals
+
+- id: t19
+  tier: 3
+  question: What is the 30-day readmission rate for index stays with no emergency visits in the 12 months before admission, and for those with at least one emergency visit, returning the no-emergency rate and at-least-one-emergency rate as two columns as percentages rounded to 2 decimals?
+  answer_sql: |
+    SELECT
+      round(100 * count_if(outcome_readmitted_30d AND prior_emergency_12m = 0) / count_if(prior_emergency_12m = 0), 2) AS no_emergency_rate,
+      round(100 * count_if(outcome_readmitted_30d AND prior_emergency_12m > 0) / count_if(prior_emergency_12m > 0), 2) AS at_least_one_emergency_rate
+    FROM healthcare_dev.gold.readmission_signals
+
+- id: t20
+  tier: 4
+  question: Will patient 'P0001' be readmitted within 30 days following their next hospital discharge?
