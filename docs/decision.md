@@ -1851,3 +1851,31 @@ The ladder runs on both batches. The gate's rule gives 12.31%, and v7, the
 table, gives 1.61%. **The decision.md entries before D65 give batch 1
 numbers**; they are not rewritten, because each recorded what was true when
 it was made.
+
+### D66 — small cells: readmission counts of 1-10 are hidden too, and so is the level that would give them back
+
+The spec hid a signal level only when it had **fewer than 11 index stays**.
+On the real data no level is that small (the smallest is 96 stays), so the
+rule hid nothing, while counts like "Appendicitis: 2 readmitted" would have
+been published. The public health rule the spec cites hides any count from
+1 to 10, and that includes the number with the outcome.
+
+**The rule now** (`readmission_story.level_row` and `complete_suppression`):
+- A level is hidden when its stays **or its readmissions**, or the rest's,
+  number 1 to 10. Zero is published: it points at no one.
+- A hidden level loses its **rate** as well as its counts, because
+  rate × stays gives the count back.
+- **Complementary suppression.** A signal's levels add up to the published
+  total (173), so a signal with exactly one hidden level would give it back
+  by subtraction (173 − 139 − 30 = 4). Its smallest published level is
+  hidden with it, preferring one that has readmissions.
+- The go/no-go decision (`separates`) is still computed on the real counts,
+  and published for every level. Hiding changes what is shown, never the
+  verdict.
+
+**What it costs**, on the real counts: 10 of the 30 non-year levels are
+hidden: age 18-44 and 80+, four of the six admit reasons, both `is_planned`
+levels, and prior stays `1` and `2+`. The 0 vs 1+ prior-stay comparison
+survives, as the `0` row's rest (1,020 stays, 34 readmitted). Hiding the
+numbers of low-rate levels is the price. The data is synthetic, but the
+project says it suppresses small cells, and now it does.
