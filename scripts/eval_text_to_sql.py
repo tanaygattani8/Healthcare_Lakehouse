@@ -37,8 +37,8 @@ Question: {question}"""
 
 METRICS_NOTE = """The tables are metric views. Select dimensions by name, wrap every
 measure in MEASURE(), and GROUP BY the dimensions, for example:
-SELECT canonical_class, MEASURE(total_claim_cost)
-FROM healthcare_dev.metrics.visits GROUP BY ALL"""
+SELECT is_planned, MEASURE(stays)
+FROM healthcare_dev.metrics.stays GROUP BY ALL"""
 
 
 def scrub(message: object) -> str:
