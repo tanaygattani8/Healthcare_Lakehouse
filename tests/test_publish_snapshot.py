@@ -25,3 +25,22 @@ def test_care_gap_measures_are_known_labels():
                                                     "statin_therapy"], "gaps": [17, 58, 1]}))
     with pytest.raises(SystemExit):
         check_only_categories(pd.DataFrame({"measure": ["statin_therapy", "Lucius"]}))
+
+
+def test_story_labels_are_known_and_nothing_else_passes():
+    check_only_categories(pd.DataFrame({
+        "signal": ["age_band", "prior_stays_12m_band", "admit_year"],
+        "level": ["80+", "2+", "2019"], "index_stays": [120, 60, 31]}))
+    check_only_categories(pd.DataFrame({"decision": ["NO-GO"], "shortlisted": [1]}))
+    with pytest.raises(SystemExit):
+        check_only_categories(pd.DataFrame({"signal": ["patient_id"]}))
+    with pytest.raises(SystemExit):
+        check_only_categories(pd.DataFrame({"level": ["Lucius"]}))
+
+
+def test_eval_labels_are_known_and_nothing_else_passes():
+    check_only_categories(pd.DataFrame({
+        "set_name": ["dev", "test"], "contestant": ["raw", "genie"],
+        "verdict": ["correct", "answered_unanswerable"], "answers": [3, 1]}))
+    with pytest.raises(SystemExit):
+        check_only_categories(pd.DataFrame({"contestant": ["raw", "gpt"]}))
