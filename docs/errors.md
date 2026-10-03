@@ -74,6 +74,9 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E49](#e49) | `NotFound: No API found for 'POST /genie/spaces/...'` asking Genie from a script | 5 |
 | [E50](#e50) | `[DELTA_METADATA_MISMATCH]` rerunning the PySpark gold notebook | 5 |
 | [E51](#e51) | `requirement failed: C:/Program Files/Git/Users/... is not absolute` uploading a notebook | 5 |
+| [E52](#e52) | `S3UploadFailedError ... AccessDenied ... explicit deny in a resource-based policy` registering a model | 6 |
+| [E53](#e53) | `Unable to access the notebook ... Either it does not exist` running a bundle notebook | 6 |
+| [E54](#e54) | `[MISSING_AGGREGATION] The non-aggregating expression "admit_day"` validating the pipeline | 6 |
 
 ---
 
@@ -1468,3 +1471,55 @@ like success, and the reconcile compared the new SQL with old PySpark.
 then check the upload: `databricks workspace export <path> --format SOURCE
 | grep <a new word>`. Never chain the import and the job with `;`: chain it
 with `&&` so a failed import stops the run.
+
+### E52 — registering a model in Unity Catalog: S3 "explicit deny" {#e52}
+```
+MlflowException: The following failures occurred while uploading one or more artifacts to
+s3://dbstorage-prod-.../__unitystorage/catalogs/.../models/.../versions/...:
+S3UploadFailedError(... AccessDenied ... not authorized to perform: s3:PutObject ...
+with an explicit deny in a resource-based policy)
+```
+
+**Cause.** By default MLflow uploads a registered model's files straight to
+the catalog's S3 storage with short-lived cloud credentials, and Free Edition
+denies that write. The run itself logs fine; registration fails. Setting
+`MLFLOW_USE_DATABRICKS_SDK_MODEL_ARTIFACTS_REPO_FOR_UC=True` alone changed
+nothing: the MLflow that serverless ships ignored it, and the same boto
+error came back.
+
+**Fix.** Both together (probe P2 passed with them):
+- `%pip install "mlflow[databricks]==3.16.1"` at the top of the notebook;
+- `os.environ["MLFLOW_USE_DATABRICKS_SDK_MODEL_ARTIFACTS_REPO_FOR_UC"] = "True"`
+  before `import mlflow`, which routes the upload through the Files API.
+
+A failed attempt leaves a registered model with a broken version; delete it.
+
+### E53 — running a bundle notebook: "does not exist" {#e53}
+```
+Unable to access the notebook "/Workspace/Users/<you>/.bundle/healthcare-lakehouse/dev/files/notebooks/probe_ml".
+Either it does not exist, or the identity used to run this job ... lacks the required permissions.
+```
+
+**Cause.** The `.py` file did not start with `# Databricks notebook source`.
+Without that first line the bundle uploads a plain file, `probe_ml.py`, so
+there is no notebook at the path the job names. Permissions were fine.
+
+**Fix.** Make `# Databricks notebook source` the exact first line, then
+deploy again. Copy a notebook from the plan starting at that line, not at the
+imports.
+
+### E54 — validating the pipeline: MISSING_AGGREGATION on admit_day {#e54}
+```
+Failed to analyze flow 'healthcare_dev.gold.readmission_signals'.
+[MISSING_AGGREGATION] The non-aggregating expression "admit_day" is based on columns
+which are not participating in the GROUP BY clause.
+```
+
+**Cause.** Phase 6's `last_discharge` CTE computed
+`datediff(i.admit_day, max(p.discharge_day))` but grouped by
+`i.patient_id, i.stay_no` only. Spark does not infer that a key determines
+the other columns of its row. The plan's SQL had the bug; `--validate-only`
+caught it before anything was written.
+
+**Fix.** Add `i.admit_day` to the GROUP BY. One admit day per stay, so the
+result is unchanged.
