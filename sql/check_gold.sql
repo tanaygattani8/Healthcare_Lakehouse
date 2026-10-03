@@ -184,3 +184,31 @@ JOIN healthcare_dev.gold.planned_procedure pp
 WHERE s.is_planned
   AND to_date(from_utc_timestamp(p.discharged_at, 'America/Chicago'))
       = date_sub(to_date(from_utc_timestamp(s.admitted_at, 'America/Chicago')), 1);
+
+-- Phase 6. The populations and the split (spec §2). Expect the total row
+-- (part NULL) at all = 10724 / 140 and no_bypass = 9891 / 61, and production
+-- (all) at 2451 / 34. Record counts of 11 or more in decision.md; write any
+-- count of 1-10 as "1-10".
+WITH s AS (
+    SELECT *,
+           CASE WHEN admit_day >= DATE'2020-01-01' THEN 'production'
+                WHEN discharge_day <= DATE'2019-12-01' THEN 'training'
+                ELSE 'gap' END AS part
+    FROM healthcare_dev.gold.readmission_signals
+)
+SELECT part,
+       count(*)                                                    AS all_stays,
+       count_if(outcome_readmitted_30d)                            AS all_readmitted,
+       count_if(NOT had_bypass_surgery)                            AS no_bypass_stays,
+       count_if(NOT had_bypass_surgery AND outcome_readmitted_30d) AS no_bypass_readmitted
+FROM s
+GROUP BY ROLLUP(part)
+ORDER BY part;
+
+-- The new columns are sane. Expect 0 in every *_must_be_0 column.
+SELECT count_if(days_since_last_discharge IS NULL)  AS first_stays,
+       count_if(days_since_last_discharge < 1)      AS overlapping_stay_must_be_0,
+       count_if(encounters_in_stay < 1)             AS no_encounter_must_be_0,
+       count_if(admit_day > discharge_day)          AS backwards_must_be_0,
+       count_if(admit_year <> year(admit_day))      AS year_mismatch_must_be_0
+FROM healthcare_dev.gold.readmission_signals;

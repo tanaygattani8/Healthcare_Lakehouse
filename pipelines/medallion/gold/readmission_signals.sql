@@ -1,5 +1,5 @@
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_signals
-COMMENT "One row per index stay. Never model features: post_* (known only after discharge), outcome_* (the answer), stay_claim_cost (the bill is not final at discharge), admit_year, and the keys patient_id, stay_no."
+COMMENT "One row per index stay. Never model features: post_* (known only after discharge), outcome_* (the answer), stay_claim_cost (the bill is not final at discharge), admit_year, admit_day and discharge_day (the phase 6 split), and the keys patient_id, stay_no."
 TBLPROPERTIES ("quality" = "gold")
 AS
 WITH stays AS (
@@ -85,6 +85,40 @@ return_cost AS (
     JOIN stay_cost c ON c.patient_id = b.patient_id AND c.stay_no = b.stay_no
 ),
 
+-- Phase 6 (spec §2): a coronary bypass, emergency included, from the day
+-- before admission to discharge. A feature and the population split, not a
+-- planned-care rule, so planned_procedure is unchanged.
+bypass AS (
+    SELECT DISTINCT i.patient_id, i.stay_no
+    FROM idx i
+    JOIN ${catalog}.silver.procedure p
+      ON p.patient_id = i.patient_id
+     AND p.source_code IN ('232717009', '418824004', '414088005')
+     AND to_date(from_utc_timestamp(p.started_at, 'America/Chicago'))
+         BETWEEN date_sub(i.admit_day, 1) AND i.discharge_day
+),
+
+-- Any earlier stay, index or not. NULL for a patient's first stay.
+last_discharge AS (
+    SELECT i.patient_id, i.stay_no,
+           datediff(i.admit_day, max(p.discharge_day)) AS days_since_last_discharge
+    FROM idx i
+    LEFT JOIN stays p ON p.patient_id = i.patient_id AND p.stay_no < i.stay_no
+    GROUP BY i.patient_id, i.stay_no, i.admit_day
+),
+
+-- An emergency visit on the admit day or the day before (14.9% of index
+-- stays, phase 6 probe P3).
+via_emergency AS (
+    SELECT DISTINCT i.patient_id, i.stay_no
+    FROM idx i
+    JOIN ${catalog}.gold.fact_encounter f
+      ON f.patient_id = i.patient_id
+     AND f.encounter_class = 'emergency'
+     AND datediff(i.admit_day, to_date(from_utc_timestamp(f.started_at, 'America/Chicago')))
+         BETWEEN 0 AND 1
+),
+
 joined AS (
     SELECT i.patient_id,
            i.stay_no,
@@ -101,6 +135,12 @@ joined AS (
            datediff(i.discharge_day, i.admit_day)                           AS length_of_stay_days,
            ps.prior_stays_12m,
            pe.prior_emergency_12m,
+           i.encounters_in_stay,
+           ld.days_since_last_discharge,
+           bp.patient_id IS NOT NULL                                        AS had_bypass_surgery,
+           ve.patient_id IS NOT NULL                                        AS arrived_via_emergency,
+           i.admit_day,
+           i.discharge_day,
            i.stay_claim_cost,
            fu.patient_id IS NOT NULL                                        AS post_followup_7d,
            i.readmitted_30d                                                 AS outcome_readmitted_30d,
@@ -110,6 +150,9 @@ joined AS (
     JOIN ${catalog}.silver.patient p   ON p.patient_id = i.patient_id
     JOIN prior_stays ps                ON ps.patient_id = i.patient_id AND ps.stay_no = i.stay_no
     JOIN prior_emergency pe            ON pe.patient_id = i.patient_id AND pe.stay_no = i.stay_no
+    JOIN last_discharge ld             ON ld.patient_id = i.patient_id AND ld.stay_no = i.stay_no
+    LEFT JOIN bypass bp                ON bp.patient_id = i.patient_id AND bp.stay_no = i.stay_no
+    LEFT JOIN via_emergency ve         ON ve.patient_id = i.patient_id AND ve.stay_no = i.stay_no
     LEFT JOIN conds c                  ON c.patient_id = i.patient_id AND c.stay_no = i.stay_no
     LEFT JOIN followup fu              ON fu.patient_id = i.patient_id AND fu.stay_no = i.stay_no
     LEFT JOIN return_cost rc           ON rc.patient_id = i.patient_id AND rc.stay_no = i.stay_no
@@ -152,6 +195,12 @@ SELECT j.patient_id,
        j.length_of_stay_days > k.length_of_stay_median            AS above_median_length_of_stay,
        j.prior_stays_12m,
        j.prior_emergency_12m,
+       j.encounters_in_stay,
+       j.days_since_last_discharge,
+       j.had_bypass_surgery,
+       j.arrived_via_emergency,
+       j.admit_day,
+       j.discharge_day,
        j.stay_claim_cost,
        j.post_followup_7d,
        j.outcome_readmitted_30d,
