@@ -1934,6 +1934,28 @@ The views were not changed to fix these. They were built from the spec
 before any run, and widening them to fit dev failures is what the dev set
 must not be used for twice.
 
+**Genie on the dev set** (Task 8; run `dev-1`, the same 20 questions, a
+space over the two metric views with no instructions, sample questions or
+example SQL): **15 of 20**. Its five failures:
+
+| Cause | genie | Which |
+|---|---:|---|
+| should-refuse answered | 3 | d04 (2030) answered with the latest year; d08 (names) answered with counts by age and gender; d20 (a prediction) answered with the latest year's counts |
+| view limits | 2 | d11 ranks `other` as a reason; d15 has no outcome dimension to split by |
+| wrong code, MEASURE() misuse, grouping, false block | 0 | |
+
+Genie writes correct metric-view SQL without being told how (the questions
+that broke `metrics` before the note was rewritten, it got right, including
+d17's two columns), but it **substitutes rather than refuses**: asked for a
+year with no data, a person's name or a prediction, it answers a nearby
+question instead. Only d16 (an address) was refused. No personal detail
+could leak: the views hold none.
+
+Genie's run spanned the D68 refresh: d01-d14 were scored against D65's
+gold, d15-d20 against D68's. Each verdict is consistent with itself (the
+answer key and Genie's SQL ran against the same table within seconds), but
+the run is not one snapshot. The test runs are.
+
 ### D68 — readmissions, amended again: a return for scheduled heart surgery is planned, so 173 became 140
 
 Tracing the story's labels (Task 12 Step 1) meant reading the Synthea
