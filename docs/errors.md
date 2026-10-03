@@ -77,6 +77,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E52](#e52) | `S3UploadFailedError ... AccessDenied ... explicit deny in a resource-based policy` registering a model | 6 |
 | [E53](#e53) | `Unable to access the notebook ... Either it does not exist` running a bundle notebook | 6 |
 | [E54](#e54) | `[MISSING_AGGREGATION] The non-aggregating expression "admit_day"` validating the pipeline | 6 |
+| [E55](#e55) | `databricks-sql-connector 3.4.0 requires numpy<2.0.0` after installing scikit-learn | 6 |
 
 ---
 
@@ -1523,3 +1524,17 @@ caught it before anything was written.
 
 **Fix.** Add `i.admit_day` to the GROUP BY. One admit day per stay, so the
 result is unchanged.
+
+### E55 — installing scikit-learn: numpy 2 breaks the warehouse connector {#e55}
+```
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed.
+databricks-sql-connector 3.4.0 requires numpy<2.0.0,>=1.23.4; python_version >= "3.11", but you have numpy 2.5.3 which is incompatible.
+```
+
+**Cause.** `pip install scikit-learn==1.6.1` pulled the newest scipy (1.18.1),
+which needs numpy 2, so pip upgraded numpy to 2.5.3. scikit-learn itself is
+happy with numpy 1.26, which is also what serverless runs.
+
+**Fix.** `pip install numpy==1.26.4 scipy==1.14.1` (the last scipy for numpy
+1.26 on Python 3.12), and pin both in `requirements.txt`. `pip check` then
+reports nothing.
