@@ -2189,3 +2189,9 @@ question keys, and the question file's t09 tiebreak (frozen; noted in D69).
 **The views changed after the test runs** (a dimension and a comment). The
 recorded runs used the earlier file; a rerun would see `admit_period`,
 which no question asks about.
+
+**The Genie space was deleted after the test runs.** Nothing later needs it:
+phase 6 reads gold, and the runs' verdicts are in `ops.eval_run`. To rerun the
+`genie` contestant, create a new space over `healthcare_dev.metrics.stays` and
+`.readmission` with no instructions, sample questions or example SQL (Task 8),
+and pass its id without `?o=`.
