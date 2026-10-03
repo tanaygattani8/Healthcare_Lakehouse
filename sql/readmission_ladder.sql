@@ -2,20 +2,30 @@
 -- the real table. v2 = merge stays; v3 = + local days; v4 = + data ends at
 -- the last visit of any kind; v5 = + planned returns do not count; v6 = +
 -- a cancer treatment stay is planned; v7 = + it cannot start a window
--- either (D64) (= table).
+-- either (D64); v8 = + a return for scheduled heart surgery is planned
+-- (D68) (= table).
 WITH variant AS (
-    SELECT * FROM VALUES (2, false, false, false, false, false),
-                         (3, true, false, false, false, false),
-                         (4, true, true, false, false, false),
-                         (5, true, true, true, false, false),
-                         (6, true, true, true, true, false),
-                         (7, true, true, true, true, true)
-    AS t(v, local_days, end_any, use_planned, cancer_planned, cancer_excluded)
+    SELECT * FROM VALUES (2, false, false, false, false, false, false),
+                         (3, true, false, false, false, false, false),
+                         (4, true, true, false, false, false, false),
+                         (5, true, true, true, false, false, false),
+                         (6, true, true, true, true, false, false),
+                         (7, true, true, true, true, true, false),
+                         (8, true, true, true, true, true, true)
+    AS t(v, local_days, end_any, use_planned, cancer_planned, cancer_excluded, surgery_planned)
 ),
 planned_encounter AS (
     SELECT DISTINCT pr.encounter_id AS planned_encounter_id
     FROM healthcare_dev.silver.procedure pr
     JOIN healthcare_dev.gold.planned_procedure pp ON pp.code = pr.source_code
+    WHERE pp.kind = 'cancer_treatment'
+),
+surgery AS (
+    SELECT pr.patient_id, to_date(from_utc_timestamp(pr.started_at, 'America/Chicago')) AS surgery_day,
+           pp.kind = 'emergency_heart_surgery' AS emergency
+    FROM healthcare_dev.silver.procedure pr
+    JOIN healthcare_dev.gold.planned_procedure pp ON pp.code = pr.source_code
+    WHERE pp.kind IN ('heart_surgery', 'emergency_heart_surgery')
 ),
 inp AS (
     SELECT v.*, e.patient_id, e.encounter_id, e.started_at, e.stopped_at, e.reason_description,
@@ -41,18 +51,27 @@ numbered AS (
     FROM marked
 ),
 stays AS (
-    SELECT v, local_days, end_any, use_planned, cancer_planned, cancer_excluded,
+    SELECT v, local_days, end_any, use_planned, cancer_planned, cancer_excluded, surgery_planned,
            patient_id, stay_no,
            min(start_day) AS admit_day, max(stop_day) AS discharge_day,
            min_by(reason_description, struct(started_at, encounter_id)) AS admit_reason,
            max(planned_encounter) AS cancer_treatment
     FROM numbered GROUP BY ALL
 ),
+planned_surgery AS (
+    SELECT s.v, s.patient_id, s.stay_no
+    FROM stays s JOIN surgery h
+      ON h.patient_id = s.patient_id AND h.surgery_day BETWEEN date_sub(s.admit_day, 1) AND s.discharge_day
+    WHERE s.surgery_planned
+    GROUP BY ALL HAVING NOT max(h.emergency)
+),
 stays_p AS (
     SELECT s.*, (use_planned AND pr.reason_description IS NOT NULL)
-              OR (cancer_planned AND cancer_treatment) AS is_planned
+              OR (cancer_planned AND cancer_treatment)
+              OR ps.stay_no IS NOT NULL AS is_planned
     FROM stays s LEFT JOIN healthcare_dev.gold.planned_reason pr
       ON pr.reason_description = s.admit_reason
+    LEFT JOIN planned_surgery ps ON ps.v = s.v AND ps.patient_id = s.patient_id AND ps.stay_no = s.stay_no
 ),
 ends AS (
     SELECT to_date(max(stopped_at) FILTER (WHERE readmission_role = 'index_eligible')) AS utc_inp_end,

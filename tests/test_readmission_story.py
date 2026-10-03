@@ -24,8 +24,8 @@ def test_wilson_stays_inside_0_and_1():
 
 
 def test_wilson_for_the_whole_table():
-    low, high = wilson(173, 10724)                    # D65's table
-    assert (round(low, 4), round(high, 4)) == (0.0139, 0.0187)
+    low, high = wilson(140, 10724)                    # D68's table
+    assert (round(low, 4), round(high, 4)) == (0.0111, 0.0154)
 
 
 REST = Side(stays=1046, readmitted=161, readmitted_patients=140)

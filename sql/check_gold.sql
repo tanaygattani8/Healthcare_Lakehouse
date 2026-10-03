@@ -140,7 +140,7 @@ FROM healthcare_dev.information_schema.column_tags
 WHERE schema_name = 'gold';
 
 -- Phase 5. readmission_signals: one row per index stay, agreeing with
--- readmission_events. Expect rows = keys = 10724, readmitted = 173 (D65), and 0 in
+-- readmission_events. Expect rows = keys = 10724, readmitted = 140 (D68), and 0 in
 -- every *_must_be_0 column.
 SELECT count(*)                                                    AS rows,
        count(DISTINCT patient_id, stay_no)                         AS keys,

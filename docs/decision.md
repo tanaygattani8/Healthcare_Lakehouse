@@ -1933,3 +1933,61 @@ and it puts metrics' +7 well clear of chance.
 The views were not changed to fix these. They were built from the spec
 before any run, and widening them to fit dev failures is what the dev set
 must not be used for twice.
+
+### D68 — readmissions, amended again: a return for scheduled heart surgery is planned, so 173 became 140
+
+Tracing the story's labels (Task 12 Step 1) meant reading the Synthea
+modules behind the readmissions, at the pinned commit `7e08387`. About 140
+of the 173 were heart stays:
+
+| Path | Returns | What the generator does |
+|---|---:|---|
+| CABG → CABG | 57 | `heart/cabg/postop`, state `Post Discharge Outcomes`: **10.6%** go to `Readmission to Ward` after 1-30 days. A real readmission, by rule. |
+| abnormal heart imaging → CABG | 32 | The same rule. The surgery stay's admit reason is the pre-op encounter that opened it (`heart/cabg/cabg_referral`, `Immediate Surgical Admission`); no operation on the return day. |
+| aortic valve → valve | 24 | `heart/avrr/sequence` books the `AV VHD Follow-up` as an **inpatient** stay; the valve operation follows days later. 19 of 24 returns are the operation. |
+| other → CABG | 9 | All 9 start the day of a CABG (mostly after a heart attack). |
+| → heart failure | 21 (18 from a heart failure stay) | `congestive_heart_failure` readmits on worsening. Real by rule. |
+
+**A first reading was wrong**, and the data corrected it: the 32
+imaging → CABG returns looked like the scheduled operation, but none has an
+operation on its return day.
+
+**The rule.** CMS treats CABG and aortic valve surgery as potentially
+planned: a return for one is planned unless it is acute. So a stay with a
+scheduled heart operation (`gold.planned_procedure`, kind `heart_surgery`:
+232717009, 418824004, 26212005, 1155885007, 773996000) **from the day before
+admission to discharge** is planned. The day before, because Synthea
+records a CABG on the ambulatory visit just before the inpatient stay. An
+emergency CABG (414088005, kind `emergency_heart_surgery`) in the same
+window keeps it unplanned; none of the returns had one.
+
+**Unlike D64, the surgery stay can still start a window.** D64 also took
+chemotherapy stays out of the index stays. Here that would be wrong: the 57
+real CABG readmissions start from the surgery stay. So `planned_procedure`
+gained a `kind` column, and `excl_cancer_treatment` reads only
+`cancer_treatment`.
+
+**Before and after** (ladder v8 = the table; every `_must_be_0` is 0):
+
+| | D65 | D68 |
+|---|---:|---:|
+| Index stays | 10,724 | 10,724 |
+| 30-day readmissions | 173 | **140** |
+| Patients readmitted | 158 | 127 (at most 3 each) |
+| Rate | 1.61% (1.39-1.87) | **1.31% (1.11-1.54)** |
+| Returns not counted, planned | not recorded | 48 |
+| CABG admit reason | 59 of 606 | 59 of 606 |
+| Story verdict | GO, 10 signals | GO, 9 signals |
+
+Emergency visits in the year before stopped separating. The CABG
+readmission rate (59 of 606, 9.7%) is the generator's 10.6%.
+
+**What it means for phase 6.** The returns that remain are mostly
+Synthea's heart modules by rule, so the signals that separate (heart
+disease, age 45-79, more conditions, hypertension, diabetes, men) largely
+mark who enters those modules. A model will learn that; page 4's labels say
+so.
+
+**The dev runs (D67) were scored against D65's gold.** Their verdicts are
+not rerun; the test runs (Task 9) are scored against this table, because
+the answer key's SQL runs at scoring time.

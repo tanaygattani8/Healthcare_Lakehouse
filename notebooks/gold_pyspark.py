@@ -36,7 +36,8 @@ upto = (Window.partitionBy("patient_id").orderBy("started_at", "encounter_id")
               .rowsBetween(Window.unboundedPreceding, 0))
 
 # Encounters with a procedure that is always planned: cancer treatment (D64).
-planned_encounters = (procedure.join(planned_procedure, F.col("source_code") == F.col("code"))
+planned_encounters = (procedure.join(planned_procedure.where("kind = 'cancer_treatment'"),
+                                    F.col("source_code") == F.col("code"))
                                .select(F.col("encounter_id").alias("planned_encounter_id"))
                                .distinct())
 inp = inp.join(planned_encounters, F.col("encounter_id") == F.col("planned_encounter_id"), "left")
@@ -61,13 +62,29 @@ stays = (inp.groupBy("patient_id", "stay_no")
                  F.min_by("reason_description", first).alias("admit_reason"),
                  F.max(F.col("planned_encounter_id").isNotNull()).alias("cancer_treatment")))
 
-# Planned follows the reason the stay began with, except cancer treatment,
-# which is planned wherever it falls (D64).
+# Stays with a scheduled heart operation from the day before admission to
+# discharge, unless the operation was an emergency (D68).
+surgery = (procedure.join(planned_procedure.where("kind like '%heart_surgery'"),
+                          F.col("source_code") == F.col("code"))
+                    .select(F.col("patient_id").alias("sp"), local_day("started_at").alias("surgery_day"),
+                            (F.col("kind") == "emergency_heart_surgery").alias("emergency")))
+planned_surgery = (stays.join(surgery, (F.col("sp") == F.col("patient_id"))
+                              & F.col("surgery_day").between(F.date_sub("admit_day", 1),
+                                                             F.col("discharge_day")))
+                        .groupBy("patient_id", "stay_no")
+                        .agg((~F.max("emergency")).alias("planned_surgery"))
+                        .where("planned_surgery"))
+
+# Planned follows the reason the stay began with, except cancer treatment
+# (D64) and scheduled heart surgery (D68), which are planned wherever they fall.
 stays = (stays.join(planned.withColumnRenamed("reason_description", "admit_reason")
                            .withColumn("is_planned", F.lit(True)),
                     "admit_reason", "left")
+              .join(planned_surgery, ["patient_id", "stay_no"], "left")
               .withColumn("is_planned",
-                          F.coalesce("is_planned", F.lit(False)) | F.col("cancer_treatment")))
+                          F.coalesce("is_planned", F.lit(False)) | F.col("cancer_treatment")
+                          | F.coalesce("planned_surgery", F.lit(False)))
+              .drop("planned_surgery"))
 
 # The data ends at the last visit of any kind, as a Chicago day.
 last_day = enc.agg(local_day(F.max("started_at")).alias("last_day"))

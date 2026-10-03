@@ -42,6 +42,7 @@ planned_encounter AS (
     SELECT DISTINCT pr.encounter_id AS planned_encounter_id
     FROM ${catalog}.silver.procedure pr
     JOIN ${catalog}.gold.planned_procedure pp ON pp.code = pr.source_code
+    WHERE pp.kind = 'cancer_treatment'
 ),
 
 -- "First" is by start time, then id: two encounters can start at the same
@@ -61,13 +62,35 @@ stays AS (
     GROUP BY patient_id, stay_no
 ),
 
+-- Stays with a scheduled heart operation (D68), by day, not by encounter:
+-- Synthea records a CABG on the ambulatory visit just before the inpatient
+-- stay, so the window starts the day before admission. An emergency
+-- operation in the window makes the stay unplanned.
+-- ponytail: a surgery on the previous stay's discharge day would also land
+-- in the window; no stay here starts the day after a heart operation ended one.
+planned_surgery AS (
+    SELECT s.patient_id, s.stay_no
+    FROM stays s
+    JOIN ${catalog}.silver.procedure pr
+      ON pr.patient_id = s.patient_id
+     AND to_date(from_utc_timestamp(pr.started_at, 'America/Chicago'))
+         BETWEEN date_sub(s.admit_day, 1) AND s.discharge_day
+    JOIN ${catalog}.gold.planned_procedure pp
+      ON pp.code = pr.source_code AND pp.kind IN ('heart_surgery', 'emergency_heart_surgery')
+    GROUP BY s.patient_id, s.stay_no
+    HAVING NOT max(pp.kind = 'emergency_heart_surgery')
+),
+
 -- Planned follows the reason the stay BEGAN with: an emergency admission
--- that later merges with a planned encounter is still an emergency. The one
--- exception is cancer treatment, which is planned wherever it falls (D64).
+-- that later merges with a planned encounter is still an emergency. The
+-- exceptions are cancer treatment (D64) and scheduled heart surgery (D68),
+-- which are planned wherever they fall.
 stays_p AS (
-    SELECT s.*, pr.reason_description IS NOT NULL OR s.cancer_treatment AS is_planned
+    SELECT s.*, pr.reason_description IS NOT NULL OR s.cancer_treatment
+                OR ps.stay_no IS NOT NULL AS is_planned
     FROM stays s
     LEFT JOIN ${catalog}.gold.planned_reason pr ON pr.reason_description = s.admit_reason
+    LEFT JOIN planned_surgery ps ON ps.patient_id = s.patient_id AND ps.stay_no = s.stay_no
 ),
 
 -- The end of the data: the last visit of any kind, not just the last

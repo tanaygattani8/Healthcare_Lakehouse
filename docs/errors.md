@@ -1449,3 +1449,19 @@ extra column is refused.
 **Fix.** `.option("overwriteSchema", "true")` on that write. The table is
 rebuilt whole every run, so replacing its schema loses nothing.
 `mergeSchema` would have kept dropped columns forever.
+
+### E51 — uploading a notebook from Git Bash: "is not absolute" {#e51}
+```
+Error: requirement failed: C:/Program Files/Git/Users/<you>/gold_pyspark is not absolute.
+```
+
+**Cause.** Git Bash rewrites any argument that looks like a Unix path into a
+Windows one, so the workspace path `/Users/<you>/gold_pyspark` reached the
+CLI as `C:/Program Files/Git/Users/...`. The import failed, and **the job
+that followed ran the old notebook without complaint**: its output looked
+like success, and the reconcile compared the new SQL with old PySpark.
+
+**Fix.** `export MSYS_NO_PATHCONV=1` before `databricks workspace import`,
+then check the upload: `databricks workspace export <path> --format SOURCE
+| grep <a new word>`. Never chain the import and the job with `;`: chain it
+with `&&` so a failed import stops the run.

@@ -8,7 +8,7 @@ SELECT MEASURE(stays), MEASURE(encounters_merged), MEASURE(excluded_died),
        MEASURE(excluded_cancer_treatment), MEASURE(index_stays)
 FROM healthcare_dev.metrics.stays;
 
--- Expect 10724, 173, 1.61, and readmitted_patients 158.
+-- Expect 10724, 140, 1.31, and readmitted_patients 127 (D68).
 SELECT MEASURE(index_stays), MEASURE(readmitted), round(MEASURE(readmission_rate_pct), 2),
        MEASURE(patients), MEASURE(readmitted_patients)
 FROM healthcare_dev.metrics.readmission;
