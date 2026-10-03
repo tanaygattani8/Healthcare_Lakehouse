@@ -582,3 +582,33 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
 (dims, fact_encounter, planned_reason + planned_procedure + readmission_events,
 measure_code + care_gap, patient_360), then `sql/check_gold.sql`, then the two notebooks,
 then `scripts.publish_snapshot`.
+
+### Cycle 16 — 2026-09-30 to 10-03 · Phase 5 · the readmission story and text-to-SQL
+
+1. **Probes**: `sql/probe_phase5.sql` (P1 metric views, P3 `ai_query` and
+   billing) and `scripts/probe_genie.py` (P2), with a throwaway Genie space.
+2. **`gold.readmission_signals`** (and `planned_procedure`, D64/D68): listed
+   in `databricks.yml`, `bundle deploy -t dev`, a `--validate-only` update
+   **left to finish**, then `refresh_selection` on
+   `planned_procedure, readmission_events, readmission_signals, patient_360`.
+   Then `notebooks/gold_pyspark.py` and `notebooks/reconcile_gold.py` as jobs
+   (upload with `MSYS_NO_PATHCONV=1`, E51), and `sql/readmission_ladder.sql`.
+3. **`sql/check_gold.sql`**: every `_must_be_0` is 0, and 10,724 / 140.
+4. **The question sets**: `eval/questions_dev.yaml` (Claude), then
+   `eval/questions_test.yaml` (the user), frozen into
+   `eval/questions_test.sha256` and committed **before** step 5.
+5. **`sql/metric_views.sql`** (laptop SQL, `scripts.run_sql`) creates
+   `healthcare_dev.metrics.stays` and `.readmission`; then
+   `sql/check_metrics.sql`.
+6. **The harness**: `python -m scripts.eval_text_to_sql --set dev|test
+   --run-id dev-N|test-N --contestants answer_key,raw,metrics,genie
+   --genie-space <id>`, resumable, writing verdicts to `ops.eval_run`; then
+   `sql/eval_report.sql` (it prints at most 20 failure rows).
+7. **`python -m scripts.publish_snapshot`** writes `story_totals`,
+   `story_levels` (small cells hidden, D66), `story_verdict` and
+   `eval_scores`, and no longer `gold_readmission`.
+8. **App page 4**, `app/pages/4_Readmission_story.py`, reads those four
+   files; page 3 keeps care gaps and links to it.
+
+The story's rule (`scripts/readmission_story.py`) is pure Python with its
+own tests; `publish_snapshot` calls it, so the app does no statistics.

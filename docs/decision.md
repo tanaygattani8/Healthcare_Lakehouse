@@ -2013,3 +2013,127 @@ so.
 **The dev runs (D67) were scored against D65's gold.** Their verdicts are
 not rerun; the test runs (Task 9) are scored against this table, because
 the answer key's SQL runs at scoring time.
+
+### D69 — phase 5: the readmission story, its go/no-go, and the text-to-SQL result
+
+**The question.** Who comes back to hospital within 30 days, and could we
+have seen it coming at discharge? Five chapters on app page 4, ending in a
+signal shortlist and a go/no-go for phase 6. The text-to-SQL harness asks
+the story's own questions.
+
+**Probes** (before any table):
+- **P1:** metric views work on Free Edition, `version: 1.1`.
+- **P2:** Genie's API answers from a script, 14.3 s per question
+  (16.4 s on the test runs). Its space id must not carry `?o=` (E49).
+- **P3:** `ai_query` takes 4-7 s per call cold, 2.1-2.5 s per answer on the
+  runs. `system.billing.usage` is readable but lags by hours, so cost is
+  reported as seconds per answer. Two test runs fit; nothing was dropped
+  for Free Edition.
+
+**Decisions made while planning:**
+- P-a: metric views are laptop SQL, not pipeline tables (definitions over gold).
+- P-b: the test set's fingerprint also lives in `eval/questions_test.sha256`.
+- P-c: run ids are `dev-N` or `test-N`.
+- P-d: medians and the top five admit reasons are computed in gold, because
+  a metric view dimension cannot see every row.
+- P-e: per-level patient counts drive the rule and are never published.
+- P-f: the five admit reason names are pasted into the snapshot guard.
+- P-g: no MLflow task here (phase 6).
+- P-h: page 3's readmission block moved to page 4.
+- P-i to P-k: D64, D65, D68.
+
+**`gold.readmission_signals`** is one row per index stay. Its column names
+are the leak guard: `post_*` is known only after discharge (a follow-up
+visit), `outcome_*` is the answer, and everything else is known at
+discharge. A model in phase 6 takes the unprefixed columns only. **Care
+gaps are not a signal:** `gold.care_gap` measures 2025 alone, and stays go
+back decades, so a 2025 gap on a 2012 stay would be the future. Its checks
+(`check_gold.sql`): 10,724 rows and keys, 140 readmitted as in
+`readmission_events`, and 0 in every `_must_be_0` (return cost, follow-up
+after a return, age, cost).
+
+**Order of work, provable from git:** the test questions were committed
+(`4a22ef6`, fingerprint `718b4259...6653`) before `sql/metric_views.sql`
+first was (`22267af`), so no view was shaped to them.
+
+**The story** (all "in this synthetic data"; page 4 carries the same
+sentences):
+
+| Chapter | Finding |
+|---|---|
+| 1. How big? | 140 of 10,724 index stays (1.31%, 95% 1.11-1.54) come back, from 127 patients. 12.31% before chemotherapy (D64) and heart surgery (D68) were planned. |
+| 2. Who? | Heart disease or stroke 4.06% vs 0.39%; ages 65-79 3.18%; hypertension 2.48%; diabetes 2.11%; men 1.66% vs women 1.02%; nobody under 18. |
+| 3. Around the stay | Bypass history 9.74% (the generator's 10.6%). Planned stays 2.52% vs 0.79%, because bypass surgery is planned and the returns start there. Length of stay: no difference. Follow-up within 7 days 2.95% vs 1.11%: after discharge, so explanation, not prediction. |
+| 4. Cost | Index stays $114.6M ($10,683 each); returns $0.51M ($3,648 each). |
+| 5. Could we see it? | 9 of 12 at-discharge signals separate: **GO**. |
+
+**Labels** (spec §4), traced in the Synthea modules at `7e08387`. Of the
+140 readmissions, **91 are one rule**: `heart/cabg/postop`, state
+`Post Discharge Outcomes`, sends 10.6% of bypass patients to `Readmission
+to Ward` 1-30 days later. 21 more are `congestive_heart_failure`. Each
+shortlisted signal was rerun by §5's rule **without those 91**:
+
+| Signal | Label | Separates without the 91 |
+|---|---|---|
+| Heart disease or stroke | generator rule: heart/cabg/postop | no |
+| Gender | generator rule: heart/cabg/postop | no |
+| Diabetes | generator rule: heart/cabg/postop | no |
+| Admit reason | generator rule (the bypass level) | yes (`other` high, drug abuse low) |
+| Planned admission | generator rule, through D68 | yes, and reversed: planned is then low |
+| Age band | mostly that rule; not traced | yes (18-44 low, 45-64 high) |
+| Hypertension | mostly that rule; not traced | yes |
+| More conditions than the median | mostly that rule; not traced | yes |
+| Prior stays in the year | mostly that rule; not traced | yes (1 stay high) |
+
+Length of stay and emergency visits do not separate; follow-up separates
+but is after discharge, so it is never shortlisted.
+
+**Phase 6 handover** (spec §10):
+- **Features:** the unprefixed columns of `gold.readmission_signals`;
+  target `outcome_readmitted_30d`.
+- **GO** by §5's rule as written: 9 signals separate.
+- **Baselines to beat:** the base rate, 1.31%; and the one-rule model
+  "heart disease or stroke on the admit day", which flags 25% of index
+  stays (2,684) and catches 78% of readmissions (109 of 140) at 4.06%.
+- **Split by patient**, never by stay.
+- **Report every result twice: with and without the bypass rule's 91
+  returns.** With them, a model mostly learns who has bypass surgery. Without
+  them, 49 readmissions remain, which is thin; phase 6 should say so rather
+  than tune on it.
+
+**The text-to-SQL result.** 20 frozen test questions, four contestants, two
+runs. The answer key scored 20 of 20 both times, so the scoring stands.
+
+| Contestant | Tier 1 (3) | Tier 2 (5) | Tier 3 (8) | Tier 4 (4) | test-1 | test-2 |
+|---|---:|---:|---:|---:|---:|---:|
+| Genie + metric views | 3 | 4 | 5 | 4 | **16** | **15** |
+| Llama 3.3 70B + metric views | 2 | 2 | 4 | 4 | 12 | 13 |
+| Llama 3.3 70B + gold tables | 3 | 2 | 3 | 2 | 10 | 11 |
+
+(Tier columns are test-1.) Verdicts that changed between runs: Genie 1,
+metrics 2, raw 2, so a difference of 1-2 is noise. **Tier 3**, the measures
+with rules: Genie 5, metrics 4, raw 3.
+
+Test-1's failures by cause:
+
+| Cause | raw | metrics | genie |
+|---|---:|---:|---:|
+| wrong table or column (`is_index_stay` from the other table, 3 times) | 4 | 0 | 0 |
+| added up a boolean column | 3 | 0 | 0 |
+| wrong rule (a rate's denominator; an invented "unplanned only" filter) | 1 | 1 | 0 |
+| MEASURE() misuse | 0 | 1 | 0 |
+| asks past what the views hold (longer than 7 days; 3+ ER visits) | 0 | 2 | 2 |
+| two filtered rates as two columns | 0 | 3 | 2 |
+| outcome used as a filter (not a view dimension) | 0 | 1 | 0 |
+| should-refuse answered (an insurer by join; a prediction) | 2 | 0 | 0 |
+
+**What 20 questions can say:** a semantic layer removed raw's own mistakes
+(wrong tables, types) and its personal-data answers, which the views cannot
+give by construction. Genie led by 3-4, more than the run-to-run noise but
+on too few questions to rank firmly; metrics vs raw (2) is within noise.
+**What they cannot say:** that the views are better in general. Two test
+questions asked for detail the views do not keep, and all three
+contestants missed both: the layer caps what can be asked. The metrics
+prompt was improved on the dev set (D67) and raw's was not, so part of
+metrics' margin is that note. Written the same way whichever way it came
+out.

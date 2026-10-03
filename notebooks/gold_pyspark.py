@@ -66,7 +66,8 @@ stays = (inp.groupBy("patient_id", "stay_no")
 # discharge, unless the operation was an emergency (D68).
 surgery = (procedure.join(planned_procedure.where("kind like '%heart_surgery'"),
                           F.col("source_code") == F.col("code"))
-                    .select(F.col("patient_id").alias("sp"), local_day("started_at").alias("surgery_day"),
+                    .select(F.col("patient_id").alias("sp"),
+                            local_day("started_at").alias("surgery_day"),
                             (F.col("kind") == "emergency_heart_surgery").alias("emergency")))
 planned_surgery = (stays.join(surgery, (F.col("sp") == F.col("patient_id"))
                               & F.col("surgery_day").between(F.date_sub("admit_day", 1),

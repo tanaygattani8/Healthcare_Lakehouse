@@ -7,17 +7,66 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 4 complete — bronze landed, silver modelled, the pipeline
-triggered from Airflow, PHI columns classified and masked, clinical notes
-de-identified, and a gold layer of readmissions, care gaps and a patient
-summary, rebuilt in PySpark and proven identical.
+**Status:** Phase 5 complete. Who comes back to hospital within 30 days?
+In this synthetic data, 140 of 10,724 index stays (1.31%), mostly because
+of one generator rule that readmits 10.6% of bypass patients. Could we have
+seen it coming at discharge? Nine signals known at discharge separate, six
+of them even without that rule, so phase 6 (a readmission model) is **GO**.
+Asked the story's questions in English, Genie over a metric layer scored
+16 and 15 of 20; Llama 3.3 70B scored 12 and 13 with the metric layer and 10
+and 11 with the raw gold tables.
+
+## What phase 5 produced
+
+**One question, five chapters** (app page 4): how big is the problem, who
+comes back, what happened around the stay, what it costs, and could we have
+seen it coming. Every finding says "in this synthetic data", and every
+signal carries a label: the Synthea rule that produces it, or "not traced".
+
+| | |
+|---|---:|
+| Index stays (both Synthea batches, 12,580 patients) | 10,724 |
+| 30-day readmissions | **140 (1.31%)**, from 127 patients |
+| Signals known at discharge that separate | 9 of 12, **GO** |
+| ...without the bypass rule's 91 returns | 6 |
+| Test questions, written by hand and frozen before the metric views | 20 |
+
+**The rate moved twice, and both moves were planned care counted as
+relapse.** Phase 4's 17.54% was mostly chemotherapy cycles (D64); 33 more
+"readmissions" were returns for scheduled heart surgery
+(D68). A second batch of ~11,000 patients (D65) took the readmissions from
+17 to enough to test anything.
+
+**The rule for "could we see it coming" was fixed before the numbers were
+read:** a level separates when both sides have 30+ stays, the higher rate
+comes from 10+ different patients, and the 95% Wilson intervals do not
+overlap. GO needs two such signals. Groups with 1-10 stays or readmissions
+are hidden on the page, along with the one level that would give them back
+by subtraction (D66).
+
+**Text-to-SQL, on the story's own questions:**
+
+| Contestant | test-1 | test-2 |
+|---|---:|---:|
+| Answer key (control) | 20 | 20 |
+| Genie + metric views | **16** | **15** |
+| Llama 3.3 70B + metric views | 12 | 13 |
+| Llama 3.3 70B + gold tables | 10 | 11 |
+
+Verdicts move by 1-2 between identical runs, so Genie's lead is real but
+small and metric vs raw is within noise. The metric layer removed the raw
+model's own mistakes (columns from the wrong table, summing booleans) and
+its personal-data answers, but it also capped what could be asked: two test
+questions needed detail the views do not keep, and every contestant missed
+both. Semantic search over medical codes was not built: wrong codes caused
+0 of the dev failures (D67).
 
 ## What phase 4 produced
 
 | | |
 |---|---:|
 | Gold tables | 10 |
-| 30-day readmission rate | **17.54%** (201 of 1,146 index stays) |
+| 30-day readmission rate | **17.54%** (201 of 1,146 index stays; phase 5 corrected it, D64 and D68) |
 | Care-gap measures, 2025 | 3 |
 | SQL vs PySpark, rows that differ | **0** of 1,170 and 0 of 1,148 |
 | FHIR vs CSV, rows that differ | 0 of 4,362 visits and 0 of 2,426 conditions |
@@ -229,12 +278,13 @@ there is none.
 | Service principals for CI | Service principal with scoped permissions | A PAT in GitHub Actions secrets. OIDC is the upgrade path |
 | Bundle `mode: production` | Enabled, enforcing run-as and deployment rules | Omitted — its `run_as` requirements cannot be met by a single-user Free Edition account |
 | One active pipeline per type | A pipeline per medallion layer | One pipeline containing all layers |
-| Quota shuts down compute daily | Autoscaling production clusters | Dev tier of ~1,000 patients; large runs are manual and deliberate |
+| Quota shuts down compute daily | Autoscaling production clusters | Dev tier of ~1,000 patients, plus a second batch of ~11,000 generated on the laptop as CSV only (D65); large runs are manual and deliberate |
 | Databricks Apps for internal hosting | An App behind workspace SSO | Streamlit Community Cloud — Apps sit behind workspace auth and stop after 24h |
 | One account, which owns every object | A service principal owns `ops`; analysts get `SELECT` on `silver` and nothing on `ops` | A row in `ops.phi_clearance`. **Separation of duties is impossible here, not merely weak** — there is one principal and it owns everything, so the masks demonstrate a mechanism and enforce nothing against their owner. A second principal is the fix; `REVOKE` is not |
 | One state in the dataset | Row filters segregate by region | The filter works and is verified, but with every patient in Massachusetts it can only be all-rows or no-rows |
 | No GPU, and a daily compute cap | The name model runs on GPU inference | It ran 6.5 hours on a laptop CPU after the cap stopped the Databricks job two hours in. The test set was cut to 25 patients so every program could afford it |
 | A daily compute cap | FHIR flattened for every patient | The FHIR export is 12.8 GB; track A ran on the 25 test patients (316 MB). SQL-vs-PySpark timings are one run at 1,148 patients and are not a ranking |
+| Billing visible only hours later | Cost per query from live metering | Text-to-SQL cost is reported as seconds per answer (Genie 16 s, Llama 2 s) |
 | Synthetic notes | Real notes name relatives and clinicians, and write dates many ways | Synthea notes hold first names and ISO dates only, so these scores are a ceiling for real notes, not a forecast |
 
 ## Scope rule

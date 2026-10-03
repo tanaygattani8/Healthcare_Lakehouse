@@ -71,6 +71,9 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E46](#e46) | Name model returns `B`, `ab`, `ara` for one name | 3b |
 | [E47](#e47) | `UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f3c3'` after an MLflow run | 3b |
 | [E48](#e48) | `[INVALID_EXTRACT_BASE_FIELD_TYPE] Can't extract a value from "r.type"` flattening FHIR | 4 |
+| [E49](#e49) | `NotFound: No API found for 'POST /genie/spaces/...'` asking Genie from a script | 5 |
+| [E50](#e50) | `[DELTA_METADATA_MISMATCH]` rerunning the PySpark gold notebook | 5 |
+| [E51](#e51) | `requirement failed: C:/Program Files/Git/Users/... is not absolute` uploading a notebook | 5 |
 
 ---
 

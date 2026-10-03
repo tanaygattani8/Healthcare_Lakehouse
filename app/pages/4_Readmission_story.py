@@ -21,9 +21,39 @@ TIERS = {1: "1 · one table", 2: "2 · filters, groups", 3: "3 · a measure with
          4: "4 · should refuse"}
 # Filled in Task 12 from decision.md: signal -> "generator rule: <module>" or
 # "not traced". A signal missing here is "not checked" (spec §4).
-LABELS: dict[str, str] = {}
+CABG_RULE = "generator rule: heart/cabg/postop, state Post Discharge Outcomes"
+PARTLY = "mostly heart/cabg/postop, but separates without it too: not traced"
+LABELS: dict[str, str] = {
+    "has_cardiovascular_disease": CABG_RULE, "gender": CABG_RULE, "has_diabetes": CABG_RULE,
+    "admit_reason_group": CABG_RULE + " (the CABG level)",
+    "is_planned": CABG_RULE + ", through D68: a CABG surgery stay is planned",
+    "age_band": PARTLY, "has_hypertension": PARTLY, "above_median_conditions": PARTLY,
+    "prior_stays_12m_band": PARTLY,
+}
 # Filled in Task 12: chapter number -> its one-line finding, from the numbers.
-FINDINGS: dict[int, str] = {}
+FINDINGS: dict[int, str] = {
+    1: "In this synthetic data, 140 of 10,724 index stays (1.31%) come back within 30 days, "
+       "from 127 different patients. Chemotherapy (D64) and scheduled heart surgery (D68) "
+       "are planned and do not count; before either rule, the rate was 12.31%.",
+    2: "In this synthetic data, stays with heart disease or stroke on the admit day come back "
+       "4.06% of the time, against 0.39% without. Ages 65-79 (3.18%), hypertension (2.48%), "
+       "diabetes (2.11%) and men (1.66% against 1.02%) follow, mostly because they mark who "
+       "has bypass surgery: Synthea sends 10.6% of bypass patients back to the ward.",
+    3: "In this synthetic data, a stay begun for a bypass history comes back 9.74% of the "
+       "time, the generator's 10.6%. Planned stays come back more often than unplanned "
+       "(2.52% against 0.79%), because bypass surgery is planned and is where those returns "
+       "start. A longer stay changes nothing. A follow-up visit within 7 days goes with more "
+       "readmissions (2.95% against 1.11%), not fewer; it happens after discharge, and "
+       "probably marks the sicker patients.",
+    # Escaped: Streamlit reads a pair of bare dollar signs as LaTeX.
+    4: r"In this synthetic data, index stays cost \$114.6 million, \$10,683 each; the 140 "
+       r"return stays cost \$0.51 million, \$3,648 each. The expensive returns were "
+       "scheduled heart surgery, which D68 counts as planned.",
+    5: "In this synthetic data, 9 signals known at discharge separate, so phase 6 is GO by "
+       "the rule fixed in advance. Take out the 91 returns from the bypass rule and 6 still "
+       "separate: age, hypertension, more conditions, admit reason, planned admission and "
+       "prior stays. Gender, diabetes and heart disease do not.",
+}
 
 st.set_page_config(page_title="The readmission story", page_icon="🏥")
 st.title("Who comes back, and could we see it coming?")
