@@ -1,5 +1,5 @@
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_signals
-COMMENT "One row per index stay. post_* is known only after discharge and outcome_* is the answer: never model features."
+COMMENT "One row per index stay. Never model features: post_* (known only after discharge), outcome_* (the answer), stay_claim_cost (the bill is not final at discharge), admit_year, and the keys patient_id, stay_no."
 TBLPROPERTIES ("quality" = "gold")
 AS
 WITH stays AS (

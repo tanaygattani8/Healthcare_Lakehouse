@@ -14,20 +14,22 @@ from dataclasses import dataclass
 MIN_STAYS = 30          # index stays on each side of a comparison
 MIN_PATIENTS = 10       # distinct readmitted patients on the higher-rate side
 MIN_SIGNALS = 2         # shortlisted signals needed for GO
-SUPPRESS_BELOW = 11     # index stays; a smaller cell is not published
+SUPPRESS_BELOW = 11     # index stays or readmissions of 1-10 are not published (D66)
 Z = 1.96                # 95%
 
 # Each dimension of metrics.readmission, and the chapter it belongs to (spec §2).
 SIGNALS = {
-    "admit_year": 1,
+    "admit_period": 1,
     "age_band": 2, "gender": 2, "has_diabetes": 2, "has_hypertension": 2,
     "has_cardiovascular_disease": 2, "above_median_conditions": 2,
     "admit_reason_group": 3, "is_planned": 3, "above_median_length_of_stay": 3,
     "prior_stays_12m_band": 3, "prior_emergency_12m_band": 3, "post_followup_7d": 3,
 }
 # Shown in the story, never shortlisted: a calendar dimension, and a fact
-# known only after discharge.
-NOT_AT_DISCHARGE = {"admit_year", "post_followup_7d"}
+# known only after discharge. The prefixes are a second guard, so a new
+# post_ or outcome_ signal cannot be shortlisted by being left off this set.
+NOT_AT_DISCHARGE = {"admit_period", "post_followup_7d"}
+LEAK_PREFIXES = ("post_", "outcome_")
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,9 @@ def separates(level: Side, rest: Side) -> bool:
 def shortlist(rows: Iterable[tuple[str, bool]]) -> list[str]:
     """Signals known at discharge with at least one level that separates.
     rows: (signal, separates), one per level."""
-    return sorted({signal for signal, sep in rows if sep and signal not in NOT_AT_DISCHARGE})
+    return sorted({signal for signal, sep in rows
+                   if sep and signal not in NOT_AT_DISCHARGE
+                   and not signal.startswith(LEAK_PREFIXES)})
 
 
 def verdict(shortlisted: list[str]) -> str:

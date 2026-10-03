@@ -53,7 +53,7 @@ def test_the_higher_side_needs_10_readmitted_patients():
 
 def test_shortlist_keeps_only_signals_known_at_discharge():
     rows = [("prior_stays_12m_band", True), ("prior_stays_12m_band", False),
-            ("post_followup_7d", True), ("admit_year", True), ("gender", False)]
+            ("post_followup_7d", True), ("admit_period", True), ("gender", False)]
     assert shortlist(rows) == ["prior_stays_12m_band"]
 
 
@@ -82,36 +82,57 @@ def test_follow_up_is_shown_but_never_at_discharge():
     assert row["at_discharge"] is False
 
 
+# The counts below are made up: real ones from a hidden level would undo
+# its suppression for anyone reading the repo (review I2).
+
 def test_few_readmissions_are_hidden_even_in_a_big_level():
-    row = level_row("age_band", "80+", Side(308, 7, 7), Side(10416, 166, 151))
+    row = level_row("age_band", "80+", Side(400, 6, 6), Side(9000, 150, 130))
     assert row["suppressed"] and "rate" not in row and "readmitted" not in row
 
 
 def test_few_readmissions_in_the_rest_hide_the_level_too():
-    # 166 = 173 - 7: publishing the level would give the rest's 7 back.
-    row = level_row("is_planned", "false", Side(8409, 166, 151), Side(2315, 7, 7))
+    # 150 = 156 - 6: publishing the level would give the rest's 6 back.
+    row = level_row("is_planned", "false", Side(7000, 150, 130), Side(2400, 6, 6))
     assert row["suppressed"]
 
 
 def test_zero_readmissions_is_published():
-    row = level_row("age_band", "0-17", Side(739, 0, 0), Side(9985, 173, 158))
+    row = level_row("age_band", "0-17", Side(800, 0, 0), Side(8600, 156, 136))
     assert not row["suppressed"] and row["readmitted"] == 0
 
 
+TOTAL = Side(9400, 156, 136)
+
+
+def _rows(signal, levels, total=TOTAL):
+    return [level_row(signal, level, Side(stays, readmitted, 10),
+                      Side(total.stays - stays, total.readmitted - readmitted, 100))
+            for level, stays, readmitted in levels]
+
+
 def test_a_lone_hidden_level_takes_a_second_one_with_it():
-    total = Side(10724, 173, 158)
-
-    def row(level, stays, readmitted):
-        rest = Side(total.stays - stays, total.readmitted - readmitted, 100)
-        return level_row("prior_stays_12m_band", level, Side(stays, readmitted, 10), rest)
-
-    rows = complete_suppression([row("0", 9704, 139), row("1", 924, 30), row("2+", 96, 4)])
+    rows = complete_suppression(_rows("prior_stays_12m_band",
+                                      [("0", 8000, 120), ("1", 1300, 31), ("2+", 100, 5)]))
     assert [r["suppressed"] for r in rows] == [False, True, True]
     assert "readmitted" not in rows[1]
 
 
+def test_the_complement_prefers_a_level_with_readmissions():
+    # Only 80+ is small. Hiding 0-17 (no readmissions) with it would leave
+    # 186 - 120 - 60 = 6 to subtraction, so the smallest level with
+    # readmissions, 65-79, is hidden instead.
+    rows = complete_suppression(_rows(
+        "age_band", [("0-17", 800, 0), ("45-64", 4000, 120), ("65-79", 3000, 60), ("80+", 1600, 6)],
+        total=Side(9400, 186, 160)))
+    assert {r["level"]: r["suppressed"] for r in rows} == {
+        "0-17": False, "45-64": False, "65-79": True, "80+": True}
+
+
 def test_two_hidden_levels_need_no_more():
-    rows = [level_row("is_planned", level, side, rest) for level, side, rest in
-            [("false", Side(8409, 166, 151), Side(2315, 7, 7)),
-             ("true", Side(2315, 7, 7), Side(8409, 166, 151))]]
+    rows = _rows("is_planned", [("false", 7000, 150), ("true", 2400, 6)])
+    assert all(r["suppressed"] for r in rows)
     assert complete_suppression(rows) == rows
+
+
+def test_a_post_or_outcome_signal_is_never_shortlisted():
+    assert shortlist([("post_anything", True), ("outcome_x", True), ("gender", True)]) == ["gender"]

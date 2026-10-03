@@ -27,7 +27,7 @@ signal carries a label: the Synthea rule that produces it, or "not traced".
 |---|---:|
 | Index stays (both Synthea batches, 12,580 patients) | 10,724 |
 | 30-day readmissions | **140 (1.31%)**, from 127 patients |
-| Signals known at discharge that separate | 9 of 12, **GO** |
+| Signals known at discharge that separate | 9 of 11, **GO** |
 | ...without the bypass rule's 91 returns | 6 |
 | Test questions, written by hand and frozen before the metric views | 20 |
 
@@ -53,12 +53,14 @@ by subtraction (D66).
 | Llama 3.3 70B + metric views | 12 | 13 |
 | Llama 3.3 70B + gold tables | 10 | 11 |
 
-Verdicts move by 1-2 between identical runs, so Genie's lead is real but
-small and metric vs raw is within noise. The metric layer removed the raw
-model's own mistakes (columns from the wrong table, summing booleans) and
-its personal-data answers, but it also capped what could be asked: two test
-questions needed detail the views do not keep, and every contestant missed
-both. Semantic search over medical codes was not built: wrong codes caused
+Verdicts move by 1-2 between identical runs. Genie led the metric layer by
+4 and then 2, so its lead is likely but not firm, and metric vs raw is
+within noise. The metric layer removed the raw model's own mistakes
+(columns from the wrong table, summing booleans) and its personal-data
+answers, but it also capped what could be asked: two test questions needed
+detail these views do not keep, and every contestant missed both. That cap
+was a build choice (bands and flags only, where the spec asked for every
+column), not a property of semantic layers (D70). Semantic search over medical codes was not built: wrong codes caused
 0 of the dev failures (D67).
 
 ## What phase 4 produced

@@ -19,7 +19,7 @@ dimensions:
     expr: year(from_utc_timestamp(admitted_at, 'America/Chicago'))
   - name: is_planned
     expr: is_planned
-    comment: "Began for a planned reason. A planned return is not a readmission."
+    comment: "Planned: began for a planned reason, or included chemotherapy (D64) or a scheduled heart operation (D68). A planned return is not a readmission."
 measures:
   - name: stays
     expr: count(*)
@@ -51,6 +51,9 @@ source: healthcare_dev.gold.readmission_signals
 dimensions:
   - name: admit_year
     expr: admit_year
+  - name: admit_period
+    expr: CASE WHEN admit_year < 1990 THEN '1915-1989' WHEN admit_year < 2000 THEN '1990-1999' WHEN admit_year < 2010 THEN '2000-2009' WHEN admit_year < 2020 THEN '2010-2019' ELSE '2020-2026' END
+    comment: "Year admitted, in periods wide enough that no period has 1-10 readmissions (D70)."
   - name: age_band
     expr: age_band
     comment: "Age on the admit day: 0-17, 18-44, 45-64, 65-79 or 80+."

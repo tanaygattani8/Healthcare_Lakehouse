@@ -167,3 +167,20 @@ SELECT median(conditions_at_admit) AS conditions_median,
        count_if(post_followup_7d) AS followed_up_7d,
        count_if(prior_stays_12m >= 1) AS had_prior_stay
 FROM healthcare_dev.gold.readmission_signals;
+
+-- D68's window starts the day before admission. That is only safe if no
+-- heart operation on that day belongs to the stay before (discharged that
+-- same day): such a return would wrongly turn planned.
+SELECT count(*) AS surgery_from_previous_stay_must_be_0
+FROM healthcare_dev.gold.readmission_events s
+JOIN healthcare_dev.gold.readmission_events p
+  ON p.patient_id = s.patient_id AND p.stay_no = s.stay_no - 1
+JOIN healthcare_dev.silver.procedure pr
+  ON pr.patient_id = s.patient_id
+ AND to_date(from_utc_timestamp(pr.started_at, 'America/Chicago'))
+     = date_sub(to_date(from_utc_timestamp(s.admitted_at, 'America/Chicago')), 1)
+JOIN healthcare_dev.gold.planned_procedure pp
+  ON pp.code = pr.source_code AND pp.kind = 'heart_surgery'
+WHERE s.is_planned
+  AND to_date(from_utc_timestamp(p.discharged_at, 'America/Chicago'))
+      = date_sub(to_date(from_utc_timestamp(s.admitted_at, 'America/Chicago')), 1);

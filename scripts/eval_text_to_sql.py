@@ -204,7 +204,7 @@ def main() -> None:
                                  ordered=q.ordered)
                 record(cur, run_id=args.run_id, set_name=args.set, contestant=contestant,
                        question_id=q.id, tier=q.tier, generated_sql=reply, verdict=verdict,
-                       error=error or gate or run_error,
+                       error=error or (gate and scrub(gate)) or run_error,
                        seconds=round(time.time() - started, 1))
                 print(f"{q.id} t{q.tier} {contestant:10} {verdict}", flush=True)
 

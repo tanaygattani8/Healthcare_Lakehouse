@@ -5,7 +5,7 @@ import streamlit as st
 
 SNAP = Path(__file__).parent.parent.parent / "snapshots"
 NAMES = {
-    "admit_year": "Year admitted", "age_band": "Age band", "gender": "Gender",
+    "admit_period": "Period admitted", "age_band": "Age band", "gender": "Gender",
     "has_diabetes": "Diabetes", "has_hypertension": "Hypertension",
     "has_cardiovascular_disease": "Heart disease or stroke",
     "above_median_conditions": "More conditions than the median",
@@ -29,6 +29,7 @@ LABELS: dict[str, str] = {
     "is_planned": CABG_RULE + ", through D68: a CABG surgery stay is planned",
     "age_band": PARTLY, "has_hypertension": PARTLY, "above_median_conditions": PARTLY,
     "prior_stays_12m_band": PARTLY,
+    "admit_period": "a calendar grouping, not a signal",
 }
 # Filled in Task 12: chapter number -> its one-line finding, from the numbers.
 FINDINGS: dict[int, str] = {
@@ -100,10 +101,9 @@ st.dataframe(pd.DataFrame({
     "count": [t.stays, t.encounters_merged, t.excl_died, t.excl_short_followup,
               t.excl_hospice, t.excl_cancer_treatment, t.index_stays],
 }).astype({"count": int}), hide_index=True, use_container_width=True)
-years = shown[shown["signal"] == "admit_year"].sort_values("level")
-st.bar_chart(years.set_index("level")[["index_stays", "readmitted"]], height=220)
-st.caption("By year admitted. Each year has only a few dozen index stays, so a single "
-           "year's rate is noise; the counts are shown, not the rate.")
+rates("admit_period")
+st.caption("By period admitted. No single year has more than 10 readmissions, and this "
+           "page hides 1-10, so the years are grouped until every period clears 10 (D70).")
 finding(1)
 
 st.header("2 · Who comes back?")
@@ -135,7 +135,7 @@ st.caption("Each signal known at discharge, one level against the rest. A level 
            "numbers were looked at.")
 # Hidden levels stay in the table, without numbers: their decision was made
 # on the real counts and is part of the verdict (D66).
-table = levels[levels["at_discharge"] & (levels["signal"] != "admit_year")].assign(
+table = levels[levels["at_discharge"]].assign(
     signal=lambda d: d["signal"].map(NAMES),
     **{"rate % (95% range)": lambda d: d.apply(
         lambda r: "hidden" if r.suppressed else
@@ -159,13 +159,14 @@ scores_path = SNAP / "eval_scores.parquet"
 if scores_path.exists():
     scores = pd.read_parquet(scores_path)
     name = "test" if (scores["set_name"] == "test").any() else "dev"
-    s = scores[(scores["set_name"] == name) & (scores["run_no"] == 1)]
+    s = scores[scores["set_name"] == name]
     s = (s.assign(correct=s["answers"].where(s["verdict"] == "correct", 0))
-          .groupby(["contestant", "tier"], as_index=False)[["correct", "answers"]].sum())
+          .groupby(["contestant", "run_no", "tier"], as_index=False)[["correct", "answers"]].sum())
     st.dataframe(s.assign(contestant=s["contestant"].map(CONTESTANTS), tier=s["tier"].map(TIERS),
                           score=s["correct"].astype(str) + " of " + s["answers"].astype(str))
-                  .pivot(index="contestant", columns="tier", values="score"),
+                  .pivot(index=["contestant", "run_no"], columns="tier", values="score"),
                  use_container_width=True)
     st.caption(f"The story's own questions ({name} set), asked in English. Each answer's SQL "
                "was run and compared with a hand-checked answer. Counts, not percentages: "
-               "each tier has only a few questions.")
+               "each tier has only a few questions. Two identical runs: verdicts move by 1-2 "
+               "between them, so a gap that small is noise.")

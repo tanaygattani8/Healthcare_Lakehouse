@@ -64,7 +64,8 @@ stays = (inp.groupBy("patient_id", "stay_no")
 
 # Stays with a scheduled heart operation from the day before admission to
 # discharge, unless the operation was an emergency (D68).
-surgery = (procedure.join(planned_procedure.where("kind like '%heart_surgery'"),
+heart_kinds = F.col("kind").isin("heart_surgery", "emergency_heart_surgery")
+surgery = (procedure.join(planned_procedure.where(heart_kinds),
                           F.col("source_code") == F.col("code"))
                     .select(F.col("patient_id").alias("sp"),
                             local_day("started_at").alias("surgery_day"),

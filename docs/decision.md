@@ -1856,7 +1856,7 @@ it was made.
 
 The spec hid a signal level only when it had **fewer than 11 index stays**.
 On the real data no level is that small (the smallest is 96 stays), so the
-rule hid nothing, while counts like "Appendicitis: 2 readmitted" would have
+rule hid nothing, while admit-reason counts of 1-10 readmitted would have
 been published. The public health rule the spec cites hides any count from
 1 to 10, and that includes the number with the outcome.
 
@@ -1867,7 +1867,7 @@ been published. The public health rule the spec cites hides any count from
   rate × stays gives the count back.
 - **Complementary suppression.** A signal's levels add up to the published
   total (173), so a signal with exactly one hidden level would give it back
-  by subtraction (173 − 139 − 30 = 4). Its smallest published level is
+  by subtraction (total − a − b = the hidden count). Its smallest published level is
   hidden with it, preferring one that has readmissions.
 - The go/no-go decision (`separates`) is still computed on the real counts,
   and published for every level. Hiding changes what is shown, never the
@@ -1876,7 +1876,7 @@ been published. The public health rule the spec cites hides any count from
 **What it costs**, on the real counts: 10 of the 30 non-year levels are
 hidden: age 18-44 and 80+, four of the six admit reasons, both `is_planned`
 levels, and prior stays `1` and `2+`. The 0 vs 1+ prior-stay comparison
-survives, as the `0` row's rest (1,020 stays, 34 readmitted). Hiding the
+survives, as the `0` row's rest. Hiding the
 numbers of low-rate levels is the price. The data is synthetic, but the
 project says it suppresses small cells, and now it does.
 
@@ -1967,7 +1967,7 @@ of the 173 were heart stays:
 | CABG → CABG | 57 | `heart/cabg/postop`, state `Post Discharge Outcomes`: **10.6%** go to `Readmission to Ward` after 1-30 days. A real readmission, by rule. |
 | abnormal heart imaging → CABG | 32 | The same rule. The surgery stay's admit reason is the pre-op encounter that opened it (`heart/cabg/cabg_referral`, `Immediate Surgical Admission`); no operation on the return day. |
 | aortic valve → valve | 24 | `heart/avrr/sequence` books the `AV VHD Follow-up` as an **inpatient** stay; the valve operation follows days later. 19 of 24 returns are the operation. |
-| other → CABG | 9 | All 9 start the day of a CABG (mostly after a heart attack). |
+| other → CABG | 1-10 | All start the day of a CABG. The *index* stay was mostly a heart attack; the return's own reason is the bypass history, which is not acute (see D70). |
 | → heart failure | 21 (18 from a heart failure stay) | `congestive_heart_failure` readmits on worsening. Real by rule. |
 
 **A first reading was wrong**, and the data corrected it: the 32
@@ -2044,8 +2044,10 @@ the story's own questions.
 
 **`gold.readmission_signals`** is one row per index stay. Its column names
 are the leak guard: `post_*` is known only after discharge (a follow-up
-visit), `outcome_*` is the answer, and everything else is known at
-discharge. A model in phase 6 takes the unprefixed columns only. **Care
+visit), `outcome_*` is the answer. Naming is not the whole guard, though:
+`stay_claim_cost` is unprefixed but the bill is not final at discharge, and
+`admit_year` and the keys are not features either (spec §3). The table
+COMMENT lists every exclusion (D70). **Care
 gaps are not a signal:** `gold.care_gap` measures 2025 alone, and stays go
 back decades, so a 2025 gap on a 2012 stay would be the future. Its checks
 (`check_gold.sql`): 10,724 rows and keys, 140 readmitted as in
@@ -2061,11 +2063,11 @@ sentences):
 
 | Chapter | Finding |
 |---|---|
-| 1. How big? | 140 of 10,724 index stays (1.31%, 95% 1.11-1.54) come back, from 127 patients. 12.31% before chemotherapy (D64) and heart surgery (D68) were planned. |
+| 1. How big? | 140 of 10,724 index stays (1.31%, 95% 1.11-1.54) come back, from 127 patients. Ladder v5 (D58's rules, before D64 and D68): 1,737 of 14,111, 12.31%; the phase 1 gate rounds to the same figure. |
 | 2. Who? | Heart disease or stroke 4.06% vs 0.39%; ages 65-79 3.18%; hypertension 2.48%; diabetes 2.11%; men 1.66% vs women 1.02%; nobody under 18. |
 | 3. Around the stay | Bypass history 9.74% (the generator's 10.6%). Planned stays 2.52% vs 0.79%, because bypass surgery is planned and the returns start there. Length of stay: no difference. Follow-up within 7 days 2.95% vs 1.11%: after discharge, so explanation, not prediction. |
 | 4. Cost | Index stays $114.6M ($10,683 each); returns $0.51M ($3,648 each). |
-| 5. Could we see it? | 9 of 12 at-discharge signals separate: **GO**. |
+| 5. Could we see it? | 9 of 11 at-discharge signals separate: **GO**. |
 
 **Labels** (spec §4), traced in the Synthea modules at `7e08387`. Of the
 140 readmissions, **91 are one rule**: `heart/cabg/postop`, state
@@ -2089,8 +2091,10 @@ Length of stay and emergency visits do not separate; follow-up separates
 but is after discharge, so it is never shortlisted.
 
 **Phase 6 handover** (spec §10):
-- **Features:** the unprefixed columns of `gold.readmission_signals`;
-  target `outcome_readmitted_30d`.
+- **Features:** `gold.readmission_signals` **minus** `patient_id`, `stay_no`,
+  `admit_year`, `stay_claim_cost` and every `post_*` and `outcome_*` column;
+  target `outcome_readmitted_30d`. Build the list from these exclusions, not
+  from the naming rule alone.
 - **GO** by §5's rule as written: 9 signals separate.
 - **Baselines to beat:** the base rate, 1.31%; and the one-rule model
   "heart disease or stroke on the admit day", which flags 25% of index
@@ -2129,11 +2133,59 @@ Test-1's failures by cause:
 
 **What 20 questions can say:** a semantic layer removed raw's own mistakes
 (wrong tables, types) and its personal-data answers, which the views cannot
-give by construction. Genie led by 3-4, more than the run-to-run noise but
-on too few questions to rank firmly; metrics vs raw (2) is within noise.
+give by construction. Genie led metrics by 4 and then 2 (raw by 6 and 4):
+the second run's gap is inside the noise, so Genie's lead is likely but not
+firm; metrics vs raw (2 both times) is within noise.
 **What they cannot say:** that the views are better in general. Two test
 questions asked for detail the views do not keep, and all three
-contestants missed both: the layer caps what can be asked. The metrics
+contestants missed both. That is **this layer's** cap, not every layer's:
+spec §6 asked for every at-discharge column as a dimension, and the plan
+built only the bands and flags, a departure no decision recorded until D70.
+The metrics
 prompt was improved on the dev set (D67) and raw's was not, so part of
 metrics' margin is that note. Written the same way whichever way it came
 out.
+
+**Three caveats on the harness, from the final review (D70):**
+- Genie writes and runs its SQL inside its own space, so for Genie the
+  safety gate checks SQL that has already run. The space holds only the two
+  metric views and is read-only, so the exposure is those views.
+- Any Genie reply without SQL scores as a refusal; Llama must say exactly
+  REFUSE. Genie's text is not stored, so its 4 of 4 on tier 4 was audited by
+  asking the four questions again: all four replies said the tables hold no
+  such personal detail. The score stands.
+- t09 (top 3 reason groups) has no tiebreak; it is exact only while the top
+  three counts differ, which they do.
+
+### D70 — the final review of phase 5: what it found, and what changed
+
+A fresh reviewer read the whole branch (f3cc8a7..45ae818): **0 critical, 8
+important, 16 minor**. Every important finding was checked against the data
+before anything changed.
+
+| | Finding | Checked | Done |
+|---|---|---|---|
+| I1 | Page 4's year chart showed only years with no readmissions: every year with any had 1-10, so all 74 were hidden | true | `admit_period` in the readmission view (1915-1989, then each decade to 2020-2026; 15 to 43 readmissions each), replacing `admit_year` in the story |
+| I2 | Real counts of hidden levels sat in D66 and the tests, so they could be worked out from the repo | true | made-up numbers in the tests; D66 and D68 reworded. Git history still holds them; the data is synthetic |
+| I3 | "12.31% before D64 and D68" was said to be the phase 1 gate's figure | **not a defect**: ladder v5 (D58's rules, both batches) is 1,737 of 14,111 = 12.31%, and the gate rounds to the same | D69 now names v5 |
+| I4 | "9 of 12" signals at discharge | true: 11 | README, D69 |
+| I5 | "The unprefixed columns" as features would include `stay_claim_cost`, which spec §3 excludes | true | explicit exclusion list in D69 and the table COMMENT |
+| I6 | D68's "unless acute" covers only the emergency CABG code, and the returns after a heart attack became planned | **not a defect**: CMS judges acuteness by the *return's* own reason. All 34 returns now planned were admitted for aortic valve disease, a bypass history or abnormal heart imaging; none acute | D68 says so |
+| I7 | Genie's non-SQL replies score as refusals; its text is not stored | true, and **audited**: the four tier-4 test questions asked again, and all four replies declined | caveat in D69 |
+| I8 | The views keep bands and flags only, against spec §6, which asked for every column; the two all-miss test questions come from that | true | recorded here and in D69 and the README; the views were not widened for the questions already asked |
+
+**Minor findings taken:** a check that D68's day-before window never takes
+a surgery from the stay before (`check_gold.sql`, 0); PySpark selects the
+heart-surgery kinds by name, not by pattern; the `stays.is_planned` comment
+names D64 and D68; tests for the complement's preference and for a
+`post_`/`outcome_` signal never being shortlisted; `publish_snapshot` stops
+before writing if any shown count is 1-10 or a signal has one hidden level
+(`check_small_cells`); a NULL level stops the publish; gate messages are
+scrubbed like other errors; page 4 shows both test runs; Genie's lead is
+stated as "4 and then 2". **Not taken:** the follow-up check's strength
+(the rule is correct by construction), a friendlier error for misspelt
+question keys, and the question file's t09 tiebreak (frozen; noted in D69).
+
+**The views changed after the test runs** (a dimension and a comment). The
+recorded runs used the earlier file; a rerun would see `admit_period`,
+which no question asks about.

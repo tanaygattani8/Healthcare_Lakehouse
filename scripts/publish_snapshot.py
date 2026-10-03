@@ -10,6 +10,7 @@ from scripts import dbx
 from scripts.entities import ENTITIES
 from scripts.readmission_story import (
     SIGNALS,
+    SUPPRESS_BELOW,
     Side,
     complete_suppression,
     level_row,
@@ -118,7 +119,7 @@ ALLOWED_TEXT = {
     "signal": set(SIGNALS),
     "level": {"0-17", "18-44", "45-64", "65-79", "80+", "M", "F", "true", "false",
               "0", "1", "2+", "1+", "other"} | ADMIT_REASONS
-             | {str(year) for year in range(1900, 2031)},
+             | {"1915-1989", "1990-1999", "2000-2009", "2010-2019", "2020-2026"},
     "decision": {"GO", "NO-GO"},
     "set_name": {"dev", "test"},
     "contestant": {"answer_key", "raw", "metrics", "genie"},
@@ -145,11 +146,27 @@ def fetch_story_levels(cur, catalog: str) -> pd.DataFrame:
         cur.execute(f"SELECT cast({signal} AS STRING) AS level, {STORY_MEASURES} "
                     f"FROM {view} GROUP BY ALL")
         for level, stays, readmitted, patients in cur.fetchall():
+            # A NULL level would make "<> :level" match nothing.
+            assert level is not None, f"{signal} has a NULL level"
             cur.execute(f"SELECT {STORY_MEASURES} FROM {view} "
                         f"WHERE cast({signal} AS STRING) <> :level", {"level": level})
             rest = Side(*cur.fetchone())
             rows.append(level_row(signal, level, Side(stays, readmitted, patients), rest))
-    return pd.DataFrame(complete_suppression(rows))
+    levels = pd.DataFrame(complete_suppression(rows))
+    check_small_cells(levels)
+    return levels
+
+
+def check_small_cells(levels: pd.DataFrame) -> None:
+    """Stop before writing if a published level breaks D66: a shown count of
+    1-10, or a signal with exactly one hidden level."""
+    shown = levels[~levels["suppressed"]]
+    for column in ("index_stays", "readmitted", "rest_stays", "rest_readmitted"):
+        if shown[column].between(1, SUPPRESS_BELOW - 1).any():
+            raise SystemExit(f"refusing to publish: a shown {column} is 1-10")
+    hidden = levels.groupby("signal")["suppressed"].sum()
+    if (hidden == 1).any():
+        raise SystemExit("refusing to publish: a signal has exactly one hidden level")
 
 
 def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
