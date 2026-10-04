@@ -612,3 +612,41 @@ then `scripts.publish_snapshot`.
 
 The story's rule (`scripts/readmission_story.py`) is pure Python with its
 own tests; `publish_snapshot` calls it, so the app does no statistics.
+
+### Cycle 17 — 2026-10-03/04 · Phase 6 · the readmission model
+
+1. **Probes**: `sql/probe_phase6.sql` (the `ml` schema, P3, P4) and
+   `notebooks/probe_ml.py` (P1 versions, P2 Unity Catalog registry).
+2. **`gold.readmission_signals`** gains `admit_day`, `discharge_day`,
+   `had_bypass_surgery`, `days_since_last_discharge`, `encounters_in_stay`,
+   `arrived_via_emergency`: `bundle deploy -t dev`, `--validate-only` left to
+   finish, then `refresh_selection` on `gold.readmission_signals` only. Then
+   `sql/check_gold.sql` (10,724 / 140 and 9,891 / 61). `readmission_events`
+   did not change, so no PySpark reconcile.
+3. **Every notebook runs the same way**: `databricks bundle deploy -t dev`
+   uploads `notebooks/` and `scripts/` to the bundle's `files/` folder, then
+   `bash scripts/run_notebook.sh <name>` submits it as a one-off serverless
+   job, waits, and prints its exit JSON. Each notebook first `%pip`-installs
+   scikit-learn 1.6.1 and MLflow 3.16.1, sets the Files API switch (E52), and
+   puts the `files/` folder on `sys.path`.
+4. **`train_readmission`** reads `gold.readmission_signals`, and per
+   population calls `split` → `cv_scores` → refit → `oof_scores` →
+   `alert_threshold` (on the out-of-fold scores, D72) → `evaluate`. It logs 10 MLflow runs per population to
+   `/Users/<you>/readmission`, registers `healthcare_dev.ml.readmission_all`
+   and `..._no_bypass` with alias `champion` and tags, and overwrites
+   `ml.model_results`.
+5. **`score_readmission`** loads each `@champion`, checks the production
+   count against the `prod_stays` tag, and replaces that version's rows in
+   `ml.readmission_scores`.
+6. **`drift_readmission`** loads both champions and appends one batch to
+   `ml.drift_report` (`drift_report` for features, PSI for scores against
+   out-of-fold training scores, Wilson for flag and readmission rates), plus
+   an MLflow run tagged `drift`.
+7. **`python -m scripts.publish_snapshot`** now also writes
+   `model_results` (counts dropped, small recalls hidden, breakdowns as a
+   verdict only, rounded) and `model_drift` (the latest run, rounded), which **app page 5**,
+   `app/pages/5_Readmission_model.py`, reads.
+
+The rules live in `scripts/readmission_model.py` and `scripts/drift.py`,
+pure Python with their own tests; the notebooks only read, call and write.
+

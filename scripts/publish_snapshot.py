@@ -4,10 +4,12 @@ import argparse
 import datetime as dt
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from scripts import dbx
 from scripts.entities import ENTITIES
+from scripts.readmission_model import FEATURES, GRID, POPULATIONS
 from scripts.readmission_story import (
     SIGNALS,
     SUPPRESS_BELOW,
@@ -101,6 +103,13 @@ EVAL_SNAPSHOTS = {
         "contestant, tier, verdict, count(*) AS answers "
         "FROM {catalog}.ops.eval_run GROUP BY ALL"),
 }
+# Phase 6: the model's comparison and drift, from the ml tables the notebooks
+# write. The latest drift run only; earlier runs are history for phase 8.
+MODEL_RESULTS = "SELECT * FROM {catalog}.ml.model_results"
+MODEL_DRIFT = ("SELECT drift_check, period, subject, value, low, high, status "
+               "FROM {catalog}.ml.drift_report "
+               "WHERE run_at = (SELECT max(run_at) FROM {catalog}.ml.drift_report)")
+MODEL_TEXT = {"population", "patients", "scorer", "model_kind", "model_version", "model_verdict"}
 # The five commonest admit reasons (Task 2 Step 5), pasted, so the guard
 # stays a fixed list. A new name stops the publish until it is checked.
 ADMIT_REASONS = {
@@ -124,6 +133,15 @@ ALLOWED_TEXT = {
     "set_name": {"dev", "test"},
     "contestant": {"answer_key", "raw", "metrics", "genie"},
     "verdict": set(VERDICTS),
+    "population": set(POPULATIONS),
+    "patients": {"all", "new", "returning"},
+    "scorer": {"base_rate", "rule", "model"},
+    "model_kind": set(GRID),
+    "model_verdict": {"beats", "no better", "too few to judge"},
+    "drift_check": {"feature", "score", "flag_rate", "readmission_rate"},
+    "period": {"training", "2020-2026"} | {str(year) for year in range(2020, 2027)},
+    "subject": set(FEATURES) | set(POPULATIONS),
+    "status": {"stable", "watch", "shifted", "reference"},
 }
 
 
@@ -169,6 +187,46 @@ def check_small_cells(levels: pd.DataFrame) -> None:
         raise SystemExit("refusing to publish: a signal has exactly one hidden level")
 
 
+def _numbers(df: pd.DataFrame, text: set[str]) -> pd.DataFrame:
+    # The SQL connector returns NULL as None, which makes a number column
+    # object-typed, and check_only_categories would read it as text.
+    numeric = [c for c in df.columns if c not in text]
+    return df.astype(dict.fromkeys(numeric, float))
+
+
+def publish_model_results(results: pd.DataFrame) -> pd.DataFrame:
+    """Hide a recall built on 1-10 readmissions caught or missed (D66), then
+    drop every count, so no count reaches the parquet (decision P-d)."""
+    results = _numbers(results, MODEL_TEXT)
+    small = (results["caught"].between(1, SUPPRESS_BELOW - 1)
+             | results["missed"].between(1, SUPPRESS_BELOW - 1))
+    # The rule is 0/1, so its average precision (c^2/(R*F) + (R-c)/N) and its
+    # Brier score are functions of the counts: hidden with its recall (D72).
+    # The model's are ranking and calibration scores, and stay.
+    rule_small = small & (results["scorer"] == "rule")
+    results = results.assign(recall=results["recall"].mask(small),
+                             avg_precision=results["avg_precision"].mask(rule_small),
+                             brier=results["brier"].mask(rule_small))
+    # A new/returning breakdown publishes its verdict only: its base-rate
+    # precision is readmitted / stays, and some breakdowns hold 1-10 (D72).
+    numbers = [c for c in results.columns if c not in MODEL_TEXT]
+    results.loc[results["patients"] != "all", numbers] = np.nan
+    # Rounded, so no published rate can be turned back into exact counts.
+    return (results.round(4)
+                   .drop(columns=["readmitted", "caught", "missed", "k", "model_version"]))
+
+
+def publish_drift(drift: pd.DataFrame) -> pd.DataFrame:
+    # Three decimals: an exact training rate (k / n), with the published
+    # totals, would give the 1-10 gap readmissions back by subtraction (D72).
+    # The training readmission rate is left out entirely: with the published
+    # totals it narrows the gap's 1-10 readmissions to a handful (D72). The
+    # 2020-2026 row's status still says whether training's rate fits.
+    drift = drift[~((drift["drift_check"] == "readmission_rate")
+                    & (drift["period"] == "training"))].reset_index(drop=True)
+    return _numbers(drift, {"drift_check", "period", "subject", "status"}).round(3)
+
+
 def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
     frames = {}
     with dbx.connect() as conn, conn.cursor() as cur:
@@ -186,6 +244,12 @@ def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
         frames["story_verdict"] = pd.DataFrame({"decision": [verdict(short)],
                                                 "shortlisted": [len(short)]})
         for name in ("story_totals", "story_levels", "story_verdict"):
+            check_only_categories(frames[name])
+        for name, query, publish in (("model_results", MODEL_RESULTS, publish_model_results),
+                                     ("model_drift", MODEL_DRIFT, publish_drift)):
+            cur.execute(query.format(catalog=catalog))
+            frames[name] = publish(pd.DataFrame(cur.fetchall(),
+                                                columns=[d[0] for d in cur.description]))
             check_only_categories(frames[name])
     return frames
 

@@ -7,14 +7,53 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 5 complete. Who comes back to hospital within 30 days?
-In this synthetic data, 140 of 10,724 index stays (1.31%), mostly because
-of one generator rule that readmits 10.6% of bypass patients. Could we have
-seen it coming at discharge? Nine signals known at discharge separate, six
-of them even without that rule, so phase 6 (a readmission model) is **GO**.
-Asked the story's questions in English, Genie over a metric layer scored
-16 and 15 of 20; Llama 3.3 70B scored 12 and 13 with the metric layer and 10
-and 11 with the raw gold tables.
+**Status:** Phase 6 complete. Can a model beat one rule ("heart disease or
+stroke on the admit day") at spotting 30-day readmissions? Trained on stays
+up to 2019 and judged on 2020-2026, a gradient-boosted model caught more
+readmissions than the rule at the same number of alerts, but not enough to
+rule out luck: **no better**. Without the bypass-surgery population it
+pointed the model's way, on 17 readmissions, too few to judge. The phase's
+real product is the platform around the model: experiments, a registry,
+batch scoring and a drift monitor, which says the 2020-2026 patients are
+older and sicker than the ones the model learned from.
+
+## What phase 6 produced
+
+**A model lifecycle on Free Edition, judged only against baselines** (app
+page 5). Absolute performance on synthetic data means nothing; only the
+comparison with the rule does.
+
+| | All index stays | Without bypass surgery |
+|---|---|---|
+| Training (to 2019) / production (2020-2026) stays | about 8,200 / 2,451 | about 7,700 / 2,208 |
+| Production readmissions | 34 | 17 |
+| Champion, chosen by patient-grouped cross-validation | gradient boosting | logistic regression |
+| Readmissions caught, model minus rule (95%, patients resampled) | +12.2 points (-3.0 to +29.0) | +35.7 points (+7.1 to +64.8) |
+| Verdict | **no better** | **too few to judge** (under 30) |
+
+![MLflow runs: each population's champion, versions 1 and 2](docs/images/phase6-mlflow-runs.jpg)
+
+*Each population's champion in MLflow, version 1 and version 2 (after the
+final review, D72): average precision, Brier, cross-validated average
+precision and the interval of the difference from the rule. The rule's own
+rows are left out: for a yes/no rule, its average precision gives the
+counts back.*
+
+- **The pieces:** MLflow experiments (every candidate, both baselines, the
+  champion), Unity Catalog models with a `champion` alias and a
+  `beats_rule` tag, batch scores in `ml.readmission_scores`, and a drift
+  report in `ml.drift_report`. The rules are pure Python with local tests;
+  three notebooks run them as serverless jobs.
+- **Ranking is not calibration:** the model's average precision is about
+  twice the rule's, but its Brier score is no better than the base rate's.
+- **Drift:** production patients are older (mean age 41.7 to 52.2) and
+  sicker (heart disease or stroke 21.8% to 35.4% of stays), and COVID-19 arrives
+  as an admit reason training never saw. The model flags 31-36% of stays in
+  every year against about 22% in training. The readmission rate itself did not
+  move measurably. PSI read the heart-disease jump as "stable", so
+  true/false features are judged by their rate instead (D71).
+- **Getting the registry to work** took MLflow 3.16.1 plus a Files API
+  switch (E52), and naming the three types skops may load (E56).
 
 ## What phase 5 produced
 
@@ -287,6 +326,7 @@ there is none.
 | No GPU, and a daily compute cap | The name model runs on GPU inference | It ran 6.5 hours on a laptop CPU after the cap stopped the Databricks job two hours in. The test set was cut to 25 patients so every program could afford it |
 | A daily compute cap | FHIR flattened for every patient | The FHIR export is 12.8 GB; track A ran on the 25 test patients (316 MB). SQL-vs-PySpark timings are one run at 1,148 patients and are not a ranking |
 | Billing visible only hours later | Cost per query from live metering | Text-to-SQL cost is reported as seconds per answer (Genie 16 s, Llama 2 s) |
+| Unity Catalog model registry | MLflow writes model files straight to catalog storage | Free Edition denies that write; MLflow 3.16.1 with `MLFLOW_USE_DATABRICKS_SDK_MODEL_ARTIFACTS_REPO_FOR_UC` sends it through the Files API instead (E52) |
 | Synthetic notes | Real notes name relatives and clinicians, and write dates many ways | Synthea notes hold first names and ISO dates only, so these scores are a ceiling for real notes, not a forecast |
 
 ## Scope rule

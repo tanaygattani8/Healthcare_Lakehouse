@@ -2195,3 +2195,195 @@ phase 6 reads gold, and the runs' verdicts are in `ops.eval_run`. To rerun the
 `genie` contestant, create a new space over `healthcare_dev.metrics.stays` and
 `.readmission` with no instructions, sample questions or example SQL (Task 8),
 and pass its id without `?o=`.
+
+### D71 — phase 6: the readmission model, its verdict, and the platform around it
+
+**What was built.** The lifecycle, not a model to trust: patient-grouped
+cross-validation choosing between logistic regression and gradient boosting;
+every candidate, both baselines and the champion logged to MLflow; each
+population's champion registered in Unity Catalog with a `champion` alias and
+a `beats_rule` tag; batch scores in `ml.readmission_scores`; a drift report
+appended to `ml.drift_report`; app page 5. The logic is pure Python
+(`scripts/readmission_model.py`, `scripts/drift.py`) with local tests on
+made-up rows; three notebooks run it as serverless jobs from the bundle's
+synced folder. Spec and plan: `docs/specs/2026-10-03-phase-6-design.md`,
+`docs/plans/2026-10-03-phase-6.md` (both local only).
+
+**Probes.**
+- P1: serverless runs Python 3.11.10, numpy 1.26.4 and **pandas 1.5.3** (the
+  laptop has 2.2.3; the code uses nothing newer). `scripts/` imports from the
+  bundle folder.
+- P2: the Unity Catalog registry works on Free Edition only with MLflow
+  3.16.1 installed by `%pip` **and**
+  `MLFLOW_USE_DATABRICKS_SDK_MODEL_ARTIFACTS_REPO_FOR_UC=True`. The MLflow
+  serverless ships was denied direct writes to catalog storage (E52), and
+  ignored the switch on its own.
+- P3: 14.9% of index stays had an emergency visit on the admit day or the
+  day before, so `arrived_via_emergency` was kept.
+- P4: one admit reason appears only from 2020, covering 7.0% of production
+  stays: "Disease caused by severe acute respiratory syndrome coronavirus 2",
+  that is COVID-19. The probe's `LIKE '%covid%'` missed it because the
+  SNOMED name never says "covid"; corrected to `'%coronavirus%'`.
+
+**The split** (stays / readmitted). Training is admitted by 2019 and
+discharged by 1 December 2019; the gap (a few dozen 2019 stays discharged
+later) is used for nothing; production is admitted from 2020. Training is
+rounded and the gap left out: with the exact totals, exact training counts
+would give the gap's 1-10 back by subtraction (D72).
+
+| Population | Training | Production |
+|---|---|---|
+| all | about 8,200 / about 100 | 2,451 / 34 |
+| without bypass surgery | about 7,700 / about 40 | 2,208 / 17 |
+
+The populations match the spec exactly: 10,724 / 140 and 9,891 / 61.
+
+**The verdict.** Both scorers flag the same number of production stays (868
+for all, 625 without bypass, as many as the rule flags). The interval is the
+model's recall minus the rule's, resampling patients 1,000 times; both flag
+as many stays as the rule flags in each resample. Figures are from model
+version 2, after the final review's fixes (D72).
+
+| Population | Champion (CV average precision) | Model minus rule, median (95%) | Verdict |
+|---|---|---|---|
+| all | boosting, depth 3, rate 0.05 (0.142) | +12.2 points (-3.0 to +29.0) | **no better** |
+| without bypass | logistic, C = 1 (0.111) | +35.7 points (+7.1 to +64.8) | **too few to judge** |
+
+In plain words: on every index stay the model caught a few more
+readmissions than the one rule, but too few to rule out luck, so the rule
+stands. Without the bypass population the whole interval is above zero, but
+it rests on 17 readmissions, under the 30 the spec fixed before any number
+was seen, so it is not a result; it points the model's way and no further.
+The recall percentages themselves are not written here or on page 5: every
+model and rule row has 1-10 readmissions caught or missed (D66).
+
+**Ranking is not calibration.** In "all" the model's average precision is
+0.052, about twice the rule's, against the base rate's 0.014: it orders
+stays better. (The rule's exact figure is not written: for a yes/no rule it
+gives the caught count back, D72.) Its Brier score, 0.01385, is no better than the base rate's 0.01368.
+Its scores are an order, not a risk to read as a probability.
+
+**Self-returns** (P-g: a catch that is itself a stay within 30 days of an
+earlier discharge): 1-10 of the model's catches in each population.
+
+**Drift** (training against 2020-2026):
+- **Shifted:** admit reason (PSI 0.62; COVID is 7% of production stays), age
+  (mean 41.7 to 52.2 years, PSI 0.35), conditions at admission (mean 11.5 to
+  14.8, PSI 0.36), and three true/false features by their rate: heart disease
+  or stroke 21.8% to 35.4%, hypertension 23.7% to 35.3%, diabetes 15.8% to
+  25.8%.
+- **Watch:** bypass surgery 7.1% to 9.9%, planned admission 30.7% to 27.7%.
+- **Stable:** prior stays, emergency visits, length of stay, encounters per
+  stay, days since the last discharge, gender, arrival via emergency.
+- **The flag rate.** The cutoff flags as many training stays as the rule
+  did, about 22%, measured on out-of-fold scores (D72). Production flags
+  31-36% in every year from 2020 for "all", each year's interval above 22%.
+  The biggest move is at the 2020 boundary itself; after it the rate stays
+  in that band. Per-year training rates were not computed, so whether the
+  patients were already changing before 2020 is not shown. What is shown:
+  2020-2026 patients are older and carry more chronic disease, which fits
+  Synthea following people through their lives.
+- **The outcome did not move measurably:** readmission rate about 1.3% to
+  1.4% (all), 0.6% to 0.8% (without bypass); the intervals overlap.
+
+**PSI under-alarms on true/false columns (P-m).** The first drift run read
+heart disease going from 22% to 35% as PSI 0.09, "stable": with two values,
+PSI barely moves. True/false features are now judged by their rate: if the
+training rate lies inside the 95% Wilson interval of the 2020-2026 rate, it
+is stable; outside it, a move of 5 points or more is shifted and anything
+smaller is watch, because with about 2,450 stays a 3-point move is already
+significant. (The training rate's own uncertainty is ignored; it rests on
+about 8,200 stays.) PSI is still reported. Every run is in
+`ml.drift_report`; the first is the "before".
+
+**Decisions made while planning** (plan P-a to P-m):
+- P-a: notebooks run from the bundle's synced folder and import `scripts/`;
+  `scripts/run_notebook.sh` submits, waits and prints the exit JSON.
+- P-b: scikit-learn 1.6.1 and MLflow 3.16.1 pinned; numpy 1.26.4 and scipy
+  1.14.1 pinned locally too (E55).
+- P-c: `ml.model_results` holds the comparison rows, so the snapshot reads
+  SQL like every other page.
+- P-d: `publish_model_results` hides a recall on 1-10 caught or missed, then
+  drops every count; no count reaches the parquet.
+- P-e: the base rate is computed (k/n), not simulated.
+- P-f: the bootstrap rescales k to each resample's size (replaced in D72:
+  k is the rule's own flag count in each resample).
+- P-g: a self-return is `days_since_last_discharge <= 30`.
+- P-h: `ml.drift_report` appends, one batch per run.
+- P-i: a rate's status comes from the Wilson interval.
+- P-j: the new/returning breakdown gets no bootstrap.
+- P-k: feature drift is computed for "all" only.
+- P-l: the drift columns are `drift_check` and `period`; `check` and
+  `window` are SQL keywords.
+- P-m: true/false features are judged by their rate (above).
+
+**Rulings made while building:**
+- Models are saved with skops, MLflow 3.16's default. Three named types are
+  trusted (E56), not `serialization_format="pickle"`, which trusts
+  everything.
+- `last_discharge` groups by `admit_day` too (E54).
+- The snapshot converts NULL number columns to numbers before its text guard
+  (the SQL connector returns NULL as `None`).
+- The plan's "18 runs" was wrong: 7 candidates, 2 baselines and 1 champion
+  per population is 20.
+
+**What phase 8 receives.**
+- `ml.drift_report`, with history and a status per check. As it stands it
+  would have called for a retrain from 2020: a model trained up to 2019 does
+  not describe the 2020-2026 patients.
+- Both registry aliases, with tags.
+- Notebooks whose cutoff dates are `split()`'s parameters.
+
+### D72 — the final review of phase 6: what it found, and what changed
+
+A fresh reviewer read the whole branch (3f37267..e96e358): **2 critical, 3
+important, 7 minor**. Each critical and important finding was checked
+against the committed files or the data before anything changed.
+
+| | Finding | Checked | Done |
+|---|---|---|---|
+| C1 | `model_results.parquet` gave a 1-10 count back: a breakdown's base-rate "average precision" is readmitted / stays at full precision | true: one breakdown's exact count came back from it | a new/returning breakdown publishes its verdict only, no numbers; every number is rounded to 4 places (drift to 3) |
+| C2 | D71's split table gave the gap's 1-10 back by subtraction; the drift snapshot's exact training rate did the same | true | training counts rounded ("about 8,200"), the gap left out, rates in prose to one decimal |
+| I3 | PSI read 0 for any count most rows share (0 prior stays): the quantile edges collapse and right-closed bins put 0, 1, 2 together | true: the planted case read 0.0 | `searchsorted(side="left")`, a zero-inflated planted-shift test; prior stays and encounters now read 0.002 and 0.015, still stable |
+| I4 | The cutoff and the drift reference came from the model scoring its own training stays | true in code | both from out-of-fold scores (`oof_scores`, the same grouped folds). The flag rate is still 31-36% against 22%: the shift is real, not that gap |
+| I5 | "A steady rise, not a 2020 step" was not supported | true: the biggest move is at 2020 | D71 reworded |
+
+**A scoped re-review of these fixes found three more**, all checked and
+fixed:
+- **The rule's average precision and Brier gave its caught count back.**
+  For a yes/no rule, average precision is c²/(R·F) + (R−c)/N, so a published
+  0.0248 (and D71's "0.025") pins one caught count exactly. Both are now
+  hidden wherever the rule's recall is. The model's are ranking scores and
+  stay.
+- **The training readmission rate**, even at 3 decimals, narrowed the gap's
+  readmissions to a handful. It is no longer published; the 2020-2026 row's
+  status still compares with it.
+- **This entry first quoted the leaked fraction itself.** It now does not.
+
+The MLflow screenshot in the README showed the rule rows' full-precision
+average precision, so it was retaken with the champion rows only.
+
+**Minor findings taken:** the rate rule was described backwards (D71, page
+5); heart disease in training is 21.8%, not 22.0% (the first figure
+included the gap); page 5 shows cross-validated average precision, as spec
+section 7 asked; the logged model's pyfunc returns probabilities, matching
+its signature (`pyfunc_predict_fn="predict_proba"`); the bootstrap flags as
+many stays as the rule does in each resample instead of rescaling one k,
+which moved the binary rule off its own count (about half a point on the
+median); a test's spacing. **Noted, not changed:** `ml.readmission_scores`
+keeps rows for superseded versions; a consumer filters on the champion's
+version.
+
+**Results after the fixes** (model version 2): the same champions and
+verdicts. All: +12.2 points (-3.0 to +29.0), no better. Without bypass:
++35.7 points (+7.1 to +64.8), too few to judge.
+
+**The leaked snapshot stays in the `phase-6` branch history** (commit
+670644d). The branch is squash-merged into `main` and then deleted, so
+`main` never holds it; the data is synthetic, as with D70.
+
+**What the spec's own check would have missed:** section 7's "extend
+`check_small_cells`" guards one column at a time. The rule that matters is
+per group: a group with 1-10 readmissions publishes no number at all, and
+neither does the group that gives it back by subtraction.
+
