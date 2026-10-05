@@ -2,7 +2,13 @@
 -- DECIMAL. Doubles added in a different order give a different last digit;
 -- decimals do not, so any engine totals these the same (phase 4, track B).
 
-CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.fact_encounter
+CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.fact_encounter (
+    -- A NULL condition is a violation (E57), so the allowed NULLs are spelled out.
+    -- An open visit (no stop time) has no duration.
+    CONSTRAINT duration_not_negative EXPECT (duration_hours IS NULL OR duration_hours >= 0) ON VIOLATION FAIL UPDATE,
+    -- patient_paid is total minus coverage: negative means an insurer paid more than the bill.
+    CONSTRAINT coverage_not_above_bill EXPECT (patient_paid IS NULL OR patient_paid >= 0) ON VIOLATION FAIL UPDATE
+)
 COMMENT "One row per visit. Money in DECIMAL so totals add up the same in any engine."
 TBLPROPERTIES ("quality" = "gold")
 AS

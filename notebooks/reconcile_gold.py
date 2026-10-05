@@ -39,7 +39,8 @@ def columns(df):
 patients = spark.table(f"{C}.silver.patient").count()
 rows, report = [], {}
 for name, (sql_table, py_table) in PAIRS.items():
-    a, b = spark.table(sql_table), spark.table(py_table)
+    # key_copies is a gate column the PySpark track does not build (E59).
+    a, b = spark.table(sql_table).drop("key_copies"), spark.table(py_table)
     if columns(a) != columns(b):
         # Different columns or types make every row "different". Say which.
         report[name] = {"schema_mismatch": sorted(set(columns(a)) ^ set(columns(b)))}

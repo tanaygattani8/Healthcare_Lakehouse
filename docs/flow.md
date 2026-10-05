@@ -650,3 +650,30 @@ own tests; `publish_snapshot` calls it, so the app does no statistics.
 The rules live in `scripts/readmission_model.py` and `scripts/drift.py`,
 pure Python with their own tests; the notebooks only read, call and write.
 
+
+### Cycle 18 — 2026-10-04/05 · Phase 7 · gold gates (dbt cut)
+
+1. **Probes**: a throwaway `zz_probe_phase7.sql`, validated only, then
+   removed. It covered a private view with expectations, a typed column
+   list (and a planted wrong type), and a pipeline reading
+   `information_schema`.
+2. **Before**: `sql/gold_fingerprint.sql` (12 gold tables, row count and
+   hash sum) into `data/`, and `sql/phase7_before.sql` (a copy of
+   `readmission_signals` in `ops`).
+3. **How a gate stops an update**: a row gate sits in its table's `CREATE`
+   (`CONSTRAINT ... EXPECT ... ON VIOLATION FAIL UPDATE`) and fails the
+   update before that table is replaced. A cross-table gate is a column of
+   the private view `gold_checks`, one row of violation counts, and fails
+   the update after the tables it reads. Either way the update reads
+   `FAILED`, and `get-update`, the pipeline UI and the Airflow task show it;
+   `list-pipeline-events` names the constraint and the failing row.
+4. **Run**: `bundle deploy -t dev` → `--validate-only` → `refresh_selection`
+   on the changed tables plus `gold_checks` (selectable by name).
+5. **After**: the fingerprint again, compared with `diff` (`key_copies` is
+   left out), and `sql/phase7_proof.sql`: `readmission_events` against
+   the PySpark copy, `readmission_signals` against its before-copy, both
+   ways. Then a planted `gold_checks` failure, restored, a clean run, and
+   the copy dropped (`sql/phase7_cleanup.sql`).
+6. `sql/check_gold.sql` is a report; `tests/test_gold_contract.py` checks
+   that every column the model reads is declared. `reconcile_gold.py` drops
+   `key_copies` before comparing.

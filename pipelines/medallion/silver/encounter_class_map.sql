@@ -45,8 +45,11 @@ AS t(encounter_class, canonical_class, readmission_role);
 
 -- Every encounter class in bronze must appear above. An unmapped class would
 -- otherwise become NULL and quietly drop encounters out of every denominator.
--- This view must stay empty; Task 7 attaches the expectation that enforces it.
-CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.unmapped_encounter_class
+-- This view must stay empty. The expectation was promised in phase 2 and
+-- only attached in phase 7 (D73): any row fails the update.
+CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.unmapped_encounter_class (
+    CONSTRAINT every_class_mapped EXPECT (false) ON VIOLATION FAIL UPDATE
+)
 COMMENT "Must be empty. Any row here is an encounter class nothing maps."
 AS
 SELECT DISTINCT e.ENCOUNTERCLASS AS encounter_class

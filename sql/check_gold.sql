@@ -1,40 +1,14 @@
--- Checks for the gold layer. Grows with each phase 4 step; rerun it whole.
+-- The gold report. Numbers to read, not invariants to enforce.
+-- The invariants are pipeline gates since phase 7 (D73): row gates in each
+-- table's CREATE, cross-table gates in pipelines/medallion/gold/gold_checks.sql.
+-- A gate that breaks fails the pipeline update; nothing here needs to be 0.
 
--- Step 1. Every one of these must be 0.
-SELECT count_if(o.organization_id IS NULL) AS encounters_with_unknown_organization,
-       count_if(p.provider_id IS NULL)     AS encounters_with_unknown_provider,
-       count_if(y.payer_id IS NULL)        AS encounters_with_unknown_payer
-FROM healthcare_dev.silver.encounter e
-LEFT JOIN healthcare_dev.gold.dim_organization o ON o.organization_id = e.organization_id
-LEFT JOIN healthcare_dev.gold.dim_provider     p ON p.provider_id     = e.provider_id
-LEFT JOIN healthcare_dev.gold.dim_payer        y ON y.payer_id        = e.payer_id;
-
--- Each reference table has one row per id. Must be 0.
-SELECT (SELECT count(*) - count(DISTINCT organization_id) FROM healthcare_dev.gold.dim_organization) AS duplicate_organizations,
-       (SELECT count(*) - count(DISTINCT provider_id) FROM healthcare_dev.gold.dim_provider)         AS duplicate_providers,
-       (SELECT count(*) - count(DISTINCT payer_id) FROM healthcare_dev.gold.dim_payer)               AS duplicate_payers;
-
-SELECT min(calendar_date), max(calendar_date), count(*) AS days,
-       count(*) - count(DISTINCT date_key) AS duplicate_days_must_be_0
+-- Reference tables and the visit fact. The checks that used to live here are
+-- gates now: gold_checks.unknown_* / duplicate_* / *_not_in_dim_date /
+-- fact_rows_off / fact_dollars_off, fact_encounter.duration_not_negative and
+-- coverage_not_above_bill.
+SELECT min(calendar_date), max(calendar_date), count(*) AS days
 FROM healthcare_dev.gold.dim_date;
-
--- Step 2. Same rows as silver, and the money adds up the same. The two
--- totals may differ by cents (round-then-add vs add-then-round); a dollar is a bug.
-SELECT (SELECT count(*) FROM healthcare_dev.gold.fact_encounter)   AS gold_rows,
-       (SELECT count(*) FROM healthcare_dev.silver.encounter)      AS silver_rows,
-       (SELECT sum(total_claim_cost) FROM healthcare_dev.gold.fact_encounter)  AS gold_total,
-       (SELECT round(sum(total_claim_cost), 2) FROM healthcare_dev.silver.encounter) AS silver_total,
-       (SELECT count_if(duration_hours < 0) FROM healthcare_dev.gold.fact_encounter)
-                                                                    AS negative_durations_must_be_0;
-
--- Every visit's dates exist in dim_date, and no insurer paid more than the
--- bill (patient_paid is total minus coverage, so that shows as negative). Must be 0.
-SELECT count_if(ds.date_key IS NULL)                                   AS start_not_in_dim_date,
-       count_if(f.stop_date_key IS NOT NULL AND dt.date_key IS NULL)   AS stop_not_in_dim_date,
-       count_if(f.patient_paid < 0)                                    AS coverage_above_bill
-FROM healthcare_dev.gold.fact_encounter f
-LEFT JOIN healthcare_dev.gold.dim_date ds ON ds.date_key = f.start_date_key
-LEFT JOIN healthcare_dev.gold.dim_date dt ON dt.date_key = f.stop_date_key;
 
 -- Step 3, check B. The gate's own rules, on silver: one row per ENCOUNTER,
 -- UTC days, data ending at the last hospital discharge. Must equal the gate
@@ -65,14 +39,16 @@ FROM f;
 SELECT count(*) AS inpatient_encounters_quarantined
 FROM healthcare_dev.ops.quarantine_encounter WHERE encounter_class = 'inpatient';
 
--- Step 3, check C. The real table: rate and every exclusion.
+-- Step 3, check C. The real table: rate and every exclusion. Expect 14,313
+-- stays, 1,382 encounters merged away, 10,724 index stays, 140 readmitted.
+-- (Gates now: readmission_events.index_flag_known and one_row_per_stay, and
+-- gold_checks.events_encounters_off.)
 SELECT count(*)                                         AS stays,
        sum(encounters_in_stay) - count(*)               AS encounters_merged_away,
        count_if(excl_died_during_stay)                  AS excl_died,
        count_if(excl_short_followup)                    AS excl_short_followup,
        count_if(excl_discharged_to_hospice)             AS excl_hospice,
        count_if(excl_cancer_treatment)                  AS excl_cancer_treatment,
-       count_if(is_index_stay IS NULL)                  AS index_unknown_must_be_0,
        count_if(is_index_stay)                          AS index_stays,
        count_if(is_index_stay AND readmitted_30d)       AS readmitted,
        round(100 * count_if(is_index_stay AND readmitted_30d)
@@ -91,6 +67,8 @@ WHERE patient_id = (SELECT max_by(patient_id, encounters_in_stay)
 ORDER BY stay_no;
 
 -- Step 4. One line per measure. Every column is a count except the rate.
+-- (Gates now: care_gap.one_row_per_patient_measure, and the statin rule's
+-- gold_checks.nystatin_counted and statin_missed.)
 SELECT measure, measure_year,
        count(*)                                              AS in_denominator,
        count_if(excl_age)                                    AS excl_age,
@@ -104,56 +82,27 @@ SELECT measure, measure_year,
 FROM healthcare_dev.gold.care_gap
 GROUP BY measure, measure_year ORDER BY measure;
 
--- The statin rule, both ways. Nystatin counted: must be 0 (none in this
--- data, so this cannot fail here, D57). A 'statin' medication the rule
--- misses: must be 0, and this one can fail - a brand not in measure_code.
-SELECT count_if(lower(m.source_description) LIKE '%nystatin%' AND hit.code IS NOT NULL)
-                                                        AS nystatin_counted_must_be_0,
-       count_if(lower(m.source_description) NOT LIKE '%nystatin%' AND hit.code IS NULL)
-                                                        AS statin_missed_must_be_0,
-       count_if(hit.code IS NOT NULL)                   AS statin_rows_matched
+-- How many medication rows the statin rule matches (a count to read; its two
+-- must-be-0 checks are gates).
+SELECT count_if(hit.code IS NOT NULL) AS statin_rows_matched
 FROM healthcare_dev.silver.medication m
 LEFT JOIN healthcare_dev.gold.measure_code hit
   ON hit.measure = 'statin_therapy' AND hit.role = 'numerator'
  AND lower(m.source_description) RLIKE concat('\\b', hit.code, '\\b')
 WHERE lower(m.source_description) LIKE '%statin%';
 
--- Step 5. One row per patient, and it adds up to the other gold tables.
--- rows = patients = silver_patients = 1,148; encounters_total = fact_rows;
--- cost_total = fact_cost; readmissions_total = readmission_rows; oldest <= 90.
-SELECT count(*) AS rows, count(DISTINCT patient_id) AS patients,
-       (SELECT count(*) FROM healthcare_dev.silver.patient) AS silver_patients,
-       sum(encounters) AS encounters_total,
-       (SELECT count(*) FROM healthcare_dev.gold.fact_encounter) AS fact_rows,
-       sum(total_claim_cost) AS cost_total,
-       (SELECT sum(total_claim_cost) FROM healthcare_dev.gold.fact_encounter) AS fact_cost,
-       sum(readmissions_30d) AS readmissions_total,
-       (SELECT count_if(is_index_stay AND readmitted_30d)
-          FROM healthcare_dev.gold.readmission_events) AS readmission_rows,
-       max(age_years) AS oldest_must_be_90_or_less,
-       count_if(age_years IS NULL) AS age_unknown_must_be_0
-FROM healthcare_dev.gold.patient_360;
+-- Step 5. patient_360 adding up to the other gold tables is a gate now:
+-- gold_checks.patient_360_*, and patient_360.age_known_and_capped.
+-- Gold carrying no governed tag is a gate now: gold_checks.gold_tagged_columns.
 
--- Gold must carry no governed tag: nothing in it is a direct identifier. Must be empty.
-SELECT table_name, column_name, tag_name, tag_value
-FROM healthcare_dev.information_schema.column_tags
-WHERE schema_name = 'gold';
-
--- Phase 5. readmission_signals: one row per index stay, agreeing with
--- readmission_events. Expect rows = keys = 10724, readmitted = 140 (D68), and 0 in
--- every *_must_be_0 column.
-SELECT count(*)                                                    AS rows,
-       count(DISTINCT patient_id, stay_no)                         AS keys,
-       count_if(outcome_readmitted_30d)                            AS readmitted,
-       count_if(outcome_readmitted_30d <> (outcome_return_stay_cost IS NOT NULL))
-                                                                   AS return_cost_mismatch_must_be_0,
-       count_if(post_followup_7d AND outcome_days_to_return = 1)   AS followup_after_return_must_be_0,
-       count_if(age_at_admit IS NULL OR age_at_admit > 90)         AS age_bad_must_be_0,
-       count_if(stay_claim_cost IS NULL)                           AS cost_missing_must_be_0
+-- Phase 5. readmission_signals: expect rows = 10724, readmitted = 140 (D68).
+-- One row per key, agreement with readmission_events and the per-row rules
+-- are gates now: one_row_per_stay and the other constraints in
+-- readmission_signals.sql, and gold_checks.signals_*.
+SELECT count(*) AS rows, count_if(outcome_readmitted_30d) AS readmitted
 FROM healthcare_dev.gold.readmission_signals;
 
--- What the story splits on. Six rows: five names and "other". Copy the five
--- names into Task 10 (the snapshot guard).
+-- What the story splits on. Six rows: five names and "other".
 SELECT admit_reason_group, count(*) AS index_stays,
        count_if(outcome_readmitted_30d) AS readmitted
 FROM healthcare_dev.gold.readmission_signals
@@ -168,24 +117,9 @@ SELECT median(conditions_at_admit) AS conditions_median,
        count_if(prior_stays_12m >= 1) AS had_prior_stay
 FROM healthcare_dev.gold.readmission_signals;
 
--- D68's window starts the day before admission. That is only safe if no
--- heart operation on that day belongs to the stay before (discharged that
--- same day): such a return would wrongly turn planned.
-SELECT count(*) AS surgery_from_previous_stay_must_be_0
-FROM healthcare_dev.gold.readmission_events s
-JOIN healthcare_dev.gold.readmission_events p
-  ON p.patient_id = s.patient_id AND p.stay_no = s.stay_no - 1
-JOIN healthcare_dev.silver.procedure pr
-  ON pr.patient_id = s.patient_id
- AND to_date(from_utc_timestamp(pr.started_at, 'America/Chicago'))
-     = date_sub(to_date(from_utc_timestamp(s.admitted_at, 'America/Chicago')), 1)
-JOIN healthcare_dev.gold.planned_procedure pp
-  ON pp.code = pr.source_code AND pp.kind = 'heart_surgery'
-WHERE s.is_planned
-  AND to_date(from_utc_timestamp(p.discharged_at, 'America/Chicago'))
-      = date_sub(to_date(from_utc_timestamp(s.admitted_at, 'America/Chicago')), 1);
+-- D68's day-before window is a gate now: gold_checks.surgery_from_previous_stay.
 
--- Phase 6. The populations and the split (spec §2). Expect the total row
+-- Phase 6. The populations and the split (spec section 2). Expect the total row
 -- (part NULL) at all = 10724 / 140 and no_bypass = 9891 / 61, and production
 -- (all) at 2451 / 34. Record counts of 11 or more in decision.md; write any
 -- count of 1-10 as "1-10".
@@ -205,10 +139,7 @@ FROM s
 GROUP BY ROLLUP(part)
 ORDER BY part;
 
--- The new columns are sane. Expect 0 in every *_must_be_0 column.
-SELECT count_if(days_since_last_discharge IS NULL)  AS first_stays,
-       count_if(days_since_last_discharge < 1)      AS overlapping_stay_must_be_0,
-       count_if(encounters_in_stay < 1)             AS no_encounter_must_be_0,
-       count_if(admit_day > discharge_day)          AS backwards_must_be_0,
-       count_if(admit_year <> year(admit_day))      AS year_mismatch_must_be_0
+-- First stays (no earlier discharge). Expect 4956. The other new-column
+-- rules are gates in readmission_signals.sql.
+SELECT count_if(days_since_last_discharge IS NULL) AS first_stays
 FROM healthcare_dev.gold.readmission_signals;

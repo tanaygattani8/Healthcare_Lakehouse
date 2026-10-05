@@ -1560,3 +1560,83 @@ reading them: all three come from our own pipeline, trained in the same job.
 MLflow stores the list in the model's flavor config, so `load_model` in
 scoring and drift needs nothing extra. Not `serialization_format="pickle"`:
 that would trust everything.
+
+### E57 — the first gated update: a gate fails on a NULL, not on bad data {#e57}
+```
+[EXPECTATION_VIOLATION.VERBOSITY_ALL] Flow 'healthcare_dev.gold.readmission_signals' failed to
+meet the expectation. Violated expectations: 'no_followup_after_return'.
+... "post_followup_7d":true, ... "outcome_days_to_return":null ...
+Update ... is FAILED since flow healthcare_dev.gold.readmission_signals failed an expectation check.
+```
+
+**Cause.** The phase 7 spec assumed a Lakeflow expectation that comes out
+NULL passes, as a SQL `CHECK` constraint does. It does not: NULL is a
+violation. `NOT (post_followup_7d AND outcome_days_to_return = 1)` is NULL for
+every followed-up stay with no return, so the gate failed on correct data
+(`check_gold.sql`, which counts only true, reads 0). Two `fact_encounter`
+gates had the same flaw (`duration_hours`, `patient_paid` can be NULL) and
+escaped only because that table was not recomputed in this update: a gate
+on a table planned as `NO_OP` is not evaluated.
+
+**Fix.** Every condition NULL-safe: `outcome_days_to_return <=> 1`, and
+`x IS NULL OR x >= 0` where a NULL is allowed. `gold_checks` already used
+`<=> 0`. The failed update left `readmission_signals` at its last good
+version (its fingerprint matched), which answered probe c.
+
+### E58 — `readmission_events.encounters_in_stay` multiplied inside the pipeline {#e58}
+```
+diff data/fingerprint_before.txt data/fingerprint_after_failed.txt
+<     Row(t='readmission_events', rows=14313, fingerprint=Decimal('6618...'))
+>     Row(t='readmission_events', rows=14313, fingerprint=Decimal('1142...'))
+```
+No error: the rebuilt table was silently wrong.
+
+**Cause.** In 3,374 stays, all cancer-treatment stays, the pipeline's
+`count(*)` equalled the stay's number of cancer-procedure rows, even for a
+one-encounter stay. Every other column matched the PySpark copy. The same CTEs run on the
+warehouse give 15,695 encounters in 14,313 stays with no multiplication, so the
+`SELECT DISTINCT` in `planned_encounter` did not dedupe inside the pipeline.
+Why is not visible from outside. The phase 7 "before" fingerprint (taken
+2026-10-04) was correct, and after the fix all 12 gold tables matched it
+again, so the bad build was the first phase 7 update itself: the runtime
+had changed under SQL that built correctly days earlier (E59). Cancer-treatment stays are
+never index stays, so `readmission_signals` and the model were untouched:
+all 10,724 index stays matched its copy.
+
+**Fix.** `count(DISTINCT encounter_id)`, correct however the join behaves;
+every other aggregate in that step already ignores duplicates. A new gate,
+`gold_checks.events_encounters_off`, checks that the stays' encounters add
+up to silver's index-eligible encounters.
+
+### E59 — `readmission_signals` rebuilt with duplicate stays; the cross-table gate caught it too late {#e59}
+```
+[EXPECTATION_VIOLATION.VERBOSITY_ALL] Flow 'healthcare_dev.bronze.gold_checks' failed to meet the
+expectation. Violated expectations: 'signals_rows_off, signals_duplicate_keys'.
+... "signals_rows_off":738,"signals_duplicate_keys":738 ...
+```
+
+**Cause.** The same failure as E58, in another table. `readmission_signals`
+came out with 11,462 rows for 10,724 stays; every duplicated stay had a
+7-day follow-up and the copies were identical rows. The `followup` CTE's
+`SELECT DISTINCT` did not remove duplicates inside the pipeline, so its
+LEFT JOIN multiplied the stay by its follow-up visits. The same SQL built
+10,724 rows in phase 6 and runs correctly on the warehouse. The cause is
+not established: the bad builds were full recomputes (not incremental), and
+a runtime change on channel `CURRENT` between phase 6 and 2026-10-05 fits
+but could not be confirmed from the CLI.
+
+`gold_checks` failed the update, but it runs after the table it checks:
+`readmission_signals` had already been replaced. Nothing read it before the
+fix (no model, scoring or snapshot run).
+
+**Fix.**
+- Every `SELECT DISTINCT` CTE in gold that is joined afterwards (nine: three
+  in `readmission_signals`, two in `readmission_events`, four in `care_gap`)
+  is a `GROUP BY` with a `count(*)` column. It held on one build, but may
+  compile to the same plan, so it is not the protection; `key_copies` is.
+- Each of those three tables carries `key_copies = count(*) OVER (PARTITION
+  BY <key>)` and a row gate `EXPECT (key_copies = 1)`, so a duplicated build
+  fails before the table is replaced, whatever the cause.
+- `key_copies` is not a feature (`FEATURES` is an allowlist).
+  `reconcile_gold.py` drops it before comparing; `sql/gold_fingerprint.sql`
+  and `sql/phase7_proof.sql` leave it out.

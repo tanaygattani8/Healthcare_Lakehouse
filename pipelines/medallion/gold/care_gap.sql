@@ -2,7 +2,10 @@
 -- got it (numerator), who is excused (one column per exclusion). Measured
 -- over the last complete calendar year (probe P5: 2025).
 
-CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.care_gap
+CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.care_gap (
+    -- A duplicated patient-measure fails here, before the table is replaced (E59).
+    CONSTRAINT one_row_per_patient_measure EXPECT (key_copies = 1) ON VIOLATION FAIL UPDATE
+)
 COMMENT "One row per patient per measure per year. gap = should have had it, was not excused, did not get it."
 TBLPROPERTIES ("quality" = "gold")
 AS
@@ -17,7 +20,9 @@ WITH period AS (
 -- began. Synthea rarely closes a diagnosis, so without the second rule
 -- everyone who ever died with one would sit in the population as "died".
 denominator AS (
-    SELECT DISTINCT c.patient_id, mc.measure
+    -- GROUP BY with a count, not SELECT DISTINCT: inside the pipeline a DISTINCT
+    -- CTE that is joined afterwards stopped removing duplicates (E58, E59).
+    SELECT c.patient_id, mc.measure, count(*) AS condition_rows
     FROM ${catalog}.silver.condition c
     JOIN ${catalog}.gold.measure_code mc
       ON mc.role = 'denominator' AND mc.source = 'condition' AND mc.code = c.source_code
@@ -26,15 +31,17 @@ denominator AS (
     WHERE c.onset_date <= pr.period_end
       AND (c.resolved_date IS NULL OR c.resolved_date >= pr.period_start)
       AND (p.death_date IS NULL OR p.death_date >= pr.period_start)
+    GROUP BY c.patient_id, mc.measure
 ),
 
 hba1c_done AS (
-    SELECT DISTINCT o.patient_id
+    SELECT o.patient_id, count(*) AS tests
     FROM ${catalog}.silver.observation o
     JOIN ${catalog}.gold.measure_code mc
       ON mc.measure = 'diabetes_hba1c' AND mc.role = 'numerator' AND mc.code = o.source_code
     CROSS JOIN period pr
     WHERE to_date(o.observed_at) BETWEEN pr.period_start AND pr.period_end
+    GROUP BY o.patient_id
 ),
 
 -- Blood pressure is two observations taken together. Pair them by moment,
@@ -59,7 +66,7 @@ bp_controlled AS (
 
 -- Whole-word match on the generic name: '\\b' is a word boundary.
 statin_taken AS (
-    SELECT DISTINCT m.patient_id
+    SELECT m.patient_id, count(*) AS prescriptions
     FROM ${catalog}.silver.medication m
     JOIN ${catalog}.gold.measure_code mc
       ON mc.measure = 'statin_therapy' AND mc.role = 'numerator'
@@ -67,13 +74,15 @@ statin_taken AS (
     CROSS JOIN period pr
     WHERE to_date(m.started_at) <= pr.period_end
       AND (m.stopped_at IS NULL OR to_date(m.stopped_at) >= pr.period_start)
+    GROUP BY m.patient_id
 ),
 
 in_hospice AS (
-    SELECT DISTINCT e.patient_id
+    SELECT e.patient_id, count(*) AS hospice_visits
     FROM ${catalog}.silver.encounter e CROSS JOIN period pr
     WHERE e.encounter_class = 'hospice'
       AND to_date(e.started_at) BETWEEN pr.period_start AND pr.period_end
+    GROUP BY e.patient_id
 ),
 
 flagged AS (
@@ -109,5 +118,7 @@ aged AS (
 
 SELECT patient_id, measure, measure_year, age_at_year_end,
        excl_age, excl_died, excl_hospice, numerator_met,
-       NOT (excl_age OR excl_died OR excl_hospice) AND NOT numerator_met AS gap
+       NOT (excl_age OR excl_died OR excl_hospice) AND NOT numerator_met AS gap,
+       -- The one-row-per-patient-measure gate reads it (E59).
+       count(*) OVER (PARTITION BY patient_id, measure, measure_year) AS key_copies
 FROM aged;

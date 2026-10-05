@@ -2,7 +2,10 @@
 -- addresses or identifier numbers, and no income or spend (near-unique per
 -- person, D56). Age is capped at 90: Safe Harbor groups every age over 89.
 
-CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.patient_360
+CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.patient_360 (
+    -- Safe Harbor: every age over 89 is grouped, so 90 is the ceiling.
+    CONSTRAINT age_known_and_capped EXPECT (age_years IS NOT NULL AND age_years <= 90) ON VIOLATION FAIL UPDATE
+)
 COMMENT "One row per patient. No names, addresses or identifier numbers; age capped at 90."
 TBLPROPERTIES ("quality" = "gold")
 AS

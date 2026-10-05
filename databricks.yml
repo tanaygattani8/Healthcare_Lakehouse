@@ -52,6 +52,8 @@ resources:
             path: pipelines/medallion/gold/patient_360.sql
         - file:
             path: pipelines/medallion/gold/readmission_signals.sql
+        - file:
+            path: pipelines/medallion/gold/gold_checks.sql
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual

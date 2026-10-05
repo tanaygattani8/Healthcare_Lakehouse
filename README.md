@@ -7,8 +7,12 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 6 complete. Can a model beat one rule ("heart disease or
-stroke on the admit day") at spotting 30-day readmissions? Trained on stays
+**Status:** Phase 7 complete: gold's invariants now stop the pipeline
+when they break, and on their first runs they caught two silent bugs. dbt
+was planned for this phase and cut (D73).
+
+Phase 6 asked: can a model beat one rule ("heart disease or stroke on the
+admit day") at spotting 30-day readmissions? Trained on stays
 up to 2019 and judged on 2020-2026, a gradient-boosted model caught more
 readmissions than the rule at the same number of alerts, but not enough to
 rule out luck: **no better**. Without the bypass-surgery population it
@@ -16,6 +20,29 @@ pointed the model's way, on 17 readmissions, too few to judge. The phase's
 real product is the platform around the model: experiments, a registry,
 batch scoring and a drift monitor, which says the 2020-2026 patients are
 older and sicker than the ones the model learned from.
+
+## What phase 7 produced
+
+**Gold that fails loudly instead of quietly.** dbt was planned here and cut
+(D73): each thing it would have added already exists in the pipeline.
+- The gold layer's invariants are pipeline expectations that fail the
+  update: 15 row gates in the tables they protect, which stop a bad build
+  before it replaces the table, and 22 cross-table gates in one
+  `gold_checks` view.
+- `readmission_signals` declares its columns and types, so a change that
+  would break the model fails at validation.
+- A silver gate promised in phase 2, but never attached, now is.
+
+**On their first runs the gates caught two silent bugs** (E58, E59). A
+change in the Databricks pipeline runtime stopped `SELECT DISTINCT` from
+removing duplicates inside the pipeline: one gold table miscounted
+encounters, and the model's input table came out with 738 duplicate stays.
+Neither reached the model or the app. Both are fixed, and duplicate keys
+are now refused before a table is replaced.
+
+Every gold table was then shown identical to its state before the phase
+(a row-count and hash fingerprint), and the fixed table equal to the
+independent PySpark build.
 
 ## What phase 6 produced
 

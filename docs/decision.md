@@ -2387,3 +2387,109 @@ verdicts. All: +12.2 points (-3.0 to +29.0), no better. Without bypass:
 per group: a group with 1-10 readmissions publishes no number at all, and
 neither does the group that gives it back by subtraction.
 
+
+### D73 — phase 7: dbt cut; gold's invariants become pipeline gates
+
+**dbt is cut, not deferred.** Each thing it would have added has a native
+form in the Lakeflow pipeline:
+
+| dbt benefit | Used instead |
+|---|---|
+| Tests on every build | Expectations with `ON VIOLATION FAIL UPDATE` |
+| A contract on a model | A typed column list in the materialized view's `CREATE` |
+| Lineage | Unity Catalog lineage; exposures stay as README prose |
+| A DAG of SQL models | The pipeline already is one |
+
+Taking gold over would have split the medallion across two tools, needed a
+switch-over that drops and recreates every gold table, risked the numpy and
+connector pins (E55), and changed Airflow. The case left was CV value. This
+supersedes brainstorm-log §7, which stays frozen.
+
+**What replaced it:**
+- **Row gates** in the `CREATE` of the table they protect, 15 in gold: 9 on
+  `readmission_signals`, 2 each on `fact_encounter` and
+  `readmission_events`, 1 each on `patient_360` and `care_gap`. A row gate
+  fails the update before its table is replaced.
+- **22 cross-table gates** in `gold_checks`, a private materialized view:
+  one row of violation counts, each `EXPECT (x <=> 0)`.
+- **The silver gate** D-log called "Enforced, not trusted" was never
+  attached. `unmapped_encounter_class` now has `EXPECT (false)`: any row
+  fails the update.
+- **The contract** on `readmission_signals`: its 29 columns declared with
+  the types `DESCRIBE` reported, plus `key_copies` (added for E59). A planted wrong type failed at
+  `--validate-only`, before any data was touched. A local test checks that
+  every column the model reads is declared.
+- `sql/check_gold.sql` is now a report. Every query that became a gate is
+  replaced by a pointer to it.
+
+**What the gates found on their first runs.** Three things, all in
+`errors.md`:
+- **E57:** a NULL expectation is a **violation** in Lakeflow; the spec had
+  assumed the opposite. The first update failed on correct data
+  (`no_followup_after_return`). Every condition is now NULL-safe.
+- **E58:** the pipeline rebuilt `readmission_events` with
+  `encounters_in_stay` multiplied for 3,374 cancer-treatment stays.
+- **E59:** the next update rebuilt `readmission_signals` with 738 duplicate
+  stays. `gold_checks` caught it, but only after the table was replaced.
+
+E58 and E59 share a symptom: inside the pipeline, a `SELECT DISTINCT` CTE
+that was joined afterwards did not remove duplicates. The same SQL built
+correct tables in phase 6 and runs correctly on the warehouse. **The cause
+is not established.** All three builds involved (two bad, one good) were
+full recomputes, not incremental refreshes, so that explanation is ruled
+out. A runtime change on channel `CURRENT` fits, but its version could not
+be read to confirm. Two changes:
+- `readmission_signals`, `readmission_events` and `care_gap` carry
+  `key_copies` and a row gate `EXPECT (key_copies = 1)`, so a duplicated
+  build fails before it replaces the table. **This is the protection.**
+- The nine joined `SELECT DISTINCT` CTEs in gold are `GROUP BY` with a
+  `count(*)`. It held on one build, but Spark may compile it to the same
+  plan as `DISTINCT` (the unused count is pruned), so it is not relied on.
+  A bug that inflates a total without duplicating keys, as E58 did, would
+  still be caught only by `gold_checks`, after the table is replaced.
+
+**Side effect on the text-to-SQL eval.** Its "gold" contestant builds its
+prompt from `information_schema.columns`, which now lists `key_copies` on
+three tables and a longer `readmission_signals` comment. A rerun would not
+repeat the recorded gold baseline exactly; the frozen question set is
+unchanged.
+
+Nothing read the wrong tables: no model, scoring or snapshot ran while they
+were wrong, and the published `encounters_merged` (1,382) is the correct
+value.
+
+**The gates' limits, said plainly:**
+- `gold_checks` runs after the tables it reads. It turns a quietly wrong
+  build into a failed update; it cannot roll one back (E59 is the case).
+  Uniqueness, which matters most, is therefore also a row gate.
+- A gate on a table the update plans as `NO_OP` is not evaluated.
+  `fact_encounter`'s two gates ran once, and passed, in the update E59
+  failed;
+  the silver `unmapped_encounter_class` gate has not run on real data, its
+  table having been `NO_OP` in every update.
+- **Not tested:** the Airflow DAG turning red. Its operator waits for the
+  run to finish and has `retries=0`, so it is red by construction. Testing
+  it would have meant a full pipeline run just to watch a red square.
+
+**Proof that gold did not move:**
+- The fingerprint (row count and hash sum, `sql/gold_fingerprint.sql`) of
+  all 12 gold tables matched the before-record, `key_copies` left out.
+- `readmission_events` equals the PySpark build (`EXCEPT ALL` both ways,
+  0), and `readmission_signals` equals its before-copy (0 both ways).
+- So the ML side stands unchanged: champion v2, D71's verdicts,
+  `ml.readmission_scores` and `ml.drift_report`. So do the snapshots.
+
+**Each kind of gate was seen failing with its constraint named:** a row
+gate for real (E57, which left `readmission_signals` at its last good
+version), and a cross-table gate twice, once for real (E59) and once planted
+(`unknown_organization`).
+
+**Probe answers:** a private view with expectations works and can be
+refreshed by name; a typed column list works and catches a wrong type at
+validate; a failed row gate keeps the table's previous version; a pipeline
+can read `information_schema`, so "gold carries no governed tag" is a gate.
+
+**The lesson for phase 8.** Two silent runtime bugs reached gold in two
+days, and only the gates caught them. The PySpark reconciliation would
+have too, but it runs by hand. A retrain-on-drift DAG must not train on a
+table no gate has checked.

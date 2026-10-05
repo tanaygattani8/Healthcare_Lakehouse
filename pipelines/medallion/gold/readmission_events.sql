@@ -5,7 +5,12 @@
 -- data (D35); silver stores UTC, and an evening discharge in Chicago is the
 -- next day in UTC.
 
-CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_events
+CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_events (
+    -- Every stay is either an index stay or excluded for a named reason.
+    CONSTRAINT index_flag_known EXPECT (is_index_stay IS NOT NULL) ON VIOLATION FAIL UPDATE,
+    -- A duplicated stay fails here, before the table is replaced (E59).
+    CONSTRAINT one_row_per_stay EXPECT (key_copies = 1) ON VIOLATION FAIL UPDATE
+)
 COMMENT "One row per hospital stay (overlapping and same-day encounters merged). Every exclusion is its own column."
 TBLPROPERTIES ("quality" = "gold")
 AS
@@ -39,10 +44,13 @@ numbered AS (
 
 -- Encounters with a procedure that is always planned: cancer treatment (D64).
 planned_encounter AS (
-    SELECT DISTINCT pr.encounter_id AS planned_encounter_id
+    -- GROUP BY with a count, not SELECT DISTINCT: inside the pipeline a DISTINCT
+    -- CTE that is joined afterwards stopped removing duplicates (E58, E59).
+    SELECT pr.encounter_id AS planned_encounter_id, count(*) AS cancer_procedures
     FROM ${catalog}.silver.procedure pr
     JOIN ${catalog}.gold.planned_procedure pp ON pp.code = pr.source_code
     WHERE pp.kind = 'cancer_treatment'
+    GROUP BY pr.encounter_id
 ),
 
 -- "First" is by start time, then id: two encounters can start at the same
@@ -50,7 +58,9 @@ planned_encounter AS (
 stays AS (
     SELECT patient_id, stay_no,
            min_by(encounter_id, struct(started_at, encounter_id))       AS first_encounter_id,
-           count(*)                                                     AS encounters_in_stay,
+           -- DISTINCT, not count(*): in the pipeline the planned_encounter join
+           -- multiplied cancer-treatment stays by their procedure rows (E58).
+           count(DISTINCT encounter_id)                                 AS encounters_in_stay,
            min(started_at)                                              AS admitted_at,
            max(stopped_at)                                              AS discharged_at,
            min(start_day)                                               AS admit_day,
@@ -121,13 +131,14 @@ any_next AS (
 ),
 
 to_hospice AS (
-    SELECT DISTINCT s.patient_id, s.stay_no
+    SELECT s.patient_id, s.stay_no, count(*) AS hospice_visits
     FROM stays_p s
     JOIN ${catalog}.silver.encounter h
       ON h.patient_id = s.patient_id
      AND h.encounter_class = 'hospice'
      AND datediff(to_date(from_utc_timestamp(h.started_at, 'America/Chicago')),
                   s.discharge_day) BETWEEN 0 AND 1
+    GROUP BY s.patient_id, s.stay_no
 )
 
 SELECT s.patient_id,
@@ -150,7 +161,9 @@ SELECT s.patient_id,
        NOT (coalesce(p.death_date <= s.discharge_day, false)
             OR datediff(d.last_day, s.discharge_day) < 30
             OR th.stay_no IS NOT NULL
-            OR s.cancer_treatment)                                 AS is_index_stay
+            OR s.cancer_treatment)                                 AS is_index_stay,
+       -- The one-row-per-stay gate reads it (E59).
+       count(*) OVER (PARTITION BY s.patient_id, s.stay_no)        AS key_copies
 FROM stays_p s
 CROSS JOIN data_end d
 JOIN ${catalog}.silver.patient p       ON p.patient_id = s.patient_id

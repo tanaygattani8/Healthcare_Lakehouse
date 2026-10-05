@@ -1,5 +1,53 @@
-CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_signals
-COMMENT "One row per index stay. Never model features: post_* (known only after discharge), outcome_* (the answer), stay_claim_cost (the bill is not final at discharge), admit_year, admit_day and discharge_day (the phase 6 split), and the keys patient_id, stay_no."
+-- The contract (phase 7, D73). Every column is declared with today's type,
+-- copied from DESCRIBE TABLE, so a rename or retype fails the build instead
+-- of breaking the model's saved input schema at scoring. The row gates below
+-- fail the update; the table then keeps its last good version. A condition
+-- that comes out NULL counts as a violation (E57): write each one NULL-safe.
+-- Keep each CONSTRAINT on one line: tests/test_gold_contract.py reads this
+-- list line by line.
+CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_signals (
+    patient_id STRING,
+    stay_no BIGINT,
+    admit_year INT,
+    age_at_admit BIGINT,
+    age_band STRING,
+    gender STRING,
+    has_diabetes BOOLEAN,
+    has_hypertension BOOLEAN,
+    has_cardiovascular_disease BOOLEAN,
+    conditions_at_admit BIGINT,
+    above_median_conditions BOOLEAN,
+    admit_reason STRING,
+    admit_reason_group STRING,
+    is_planned BOOLEAN,
+    length_of_stay_days INT,
+    above_median_length_of_stay BOOLEAN,
+    prior_stays_12m BIGINT,
+    prior_emergency_12m BIGINT,
+    encounters_in_stay BIGINT,
+    days_since_last_discharge INT,
+    had_bypass_surgery BOOLEAN,
+    arrived_via_emergency BOOLEAN,
+    admit_day DATE,
+    discharge_day DATE,
+    stay_claim_cost DECIMAL(24,2),
+    post_followup_7d BOOLEAN,
+    outcome_readmitted_30d BOOLEAN,
+    outcome_days_to_return INT,
+    outcome_return_stay_cost DECIMAL(24,2),
+    key_copies BIGINT,
+    -- A duplicated stay fails here, before the table is replaced (E59).
+    CONSTRAINT one_row_per_stay EXPECT (key_copies = 1) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT age_known_and_capped EXPECT (age_at_admit IS NOT NULL AND age_at_admit <= 90) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT cost_present EXPECT (stay_claim_cost IS NOT NULL) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT return_cost_iff_readmitted EXPECT (outcome_readmitted_30d = (outcome_return_stay_cost IS NOT NULL)) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT no_followup_after_return EXPECT (NOT (post_followup_7d AND outcome_days_to_return <=> 1)) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT no_overlapping_stay EXPECT (days_since_last_discharge IS NULL OR days_since_last_discharge >= 1) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT has_an_encounter EXPECT (encounters_in_stay >= 1) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT admit_not_after_discharge EXPECT (admit_day <= discharge_day) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT year_matches_day EXPECT (admit_year = year(admit_day)) ON VIOLATION FAIL UPDATE
+)
+COMMENT "One row per index stay. Never model features: post_* (known only after discharge), outcome_* (the answer), stay_claim_cost (the bill is not final at discharge), admit_year, admit_day and discharge_day (the phase 6 split), the keys patient_id, stay_no, and key_copies (a gate)."
 TBLPROPERTIES ("quality" = "gold")
 AS
 WITH stays AS (
@@ -64,13 +112,16 @@ prior_emergency AS (
 ),
 
 followup AS (
-    SELECT DISTINCT i.patient_id, i.stay_no
+    -- GROUP BY with a count, not SELECT DISTINCT: inside the pipeline a DISTINCT
+    -- CTE that is joined afterwards stopped removing duplicates (E58, E59).
+    SELECT i.patient_id, i.stay_no, count(*) AS followup_visits
     FROM idx i
     JOIN ${catalog}.gold.fact_encounter f
       ON f.patient_id = i.patient_id
      AND f.canonical_class IN ('ambulatory', 'preventive')
     WHERE datediff(to_date(from_utc_timestamp(f.started_at, 'America/Chicago')), i.discharge_day)
           BETWEEN 1 AND least(7, coalesce(i.days_to_next_stay - 1, 7))
+    GROUP BY i.patient_id, i.stay_no
 ),
 
 -- The unplanned stay that made this one a readmission, for its cost.
@@ -89,13 +140,14 @@ return_cost AS (
 -- before admission to discharge. A feature and the population split, not a
 -- planned-care rule, so planned_procedure is unchanged.
 bypass AS (
-    SELECT DISTINCT i.patient_id, i.stay_no
+    SELECT i.patient_id, i.stay_no, count(*) AS bypass_procedures
     FROM idx i
     JOIN ${catalog}.silver.procedure p
       ON p.patient_id = i.patient_id
      AND p.source_code IN ('232717009', '418824004', '414088005')
      AND to_date(from_utc_timestamp(p.started_at, 'America/Chicago'))
          BETWEEN date_sub(i.admit_day, 1) AND i.discharge_day
+    GROUP BY i.patient_id, i.stay_no
 ),
 
 -- Any earlier stay, index or not. NULL for a patient's first stay.
@@ -110,13 +162,14 @@ last_discharge AS (
 -- An emergency visit on the admit day or the day before (14.9% of index
 -- stays, phase 6 probe P3).
 via_emergency AS (
-    SELECT DISTINCT i.patient_id, i.stay_no
+    SELECT i.patient_id, i.stay_no, count(*) AS emergency_visits
     FROM idx i
     JOIN ${catalog}.gold.fact_encounter f
       ON f.patient_id = i.patient_id
      AND f.encounter_class = 'emergency'
      AND datediff(i.admit_day, to_date(from_utc_timestamp(f.started_at, 'America/Chicago')))
          BETWEEN 0 AND 1
+    GROUP BY i.patient_id, i.stay_no
 ),
 
 joined AS (
@@ -205,7 +258,9 @@ SELECT j.patient_id,
        j.post_followup_7d,
        j.outcome_readmitted_30d,
        j.outcome_days_to_return,
-       j.outcome_return_stay_cost
+       j.outcome_return_stay_cost,
+       -- Not a feature: the one-row-per-stay gate reads it (E59).
+       count(*) OVER (PARTITION BY j.patient_id, j.stay_no)         AS key_copies
 FROM joined j
 CROSS JOIN cut k
 JOIN top_reason t ON t.admit_reason = j.admit_reason;
