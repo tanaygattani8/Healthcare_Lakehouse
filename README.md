@@ -7,9 +7,10 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 7 complete: gold's invariants now stop the pipeline
-when they break, and on their first runs they caught two silent bugs. dbt
-was planned for this phase and cut (D73).
+**Status:** Phase 8 complete: an AI/BI operations dashboard for a hospital
+quality and operations director, kept as code, with every small number
+hidden by construction (D74). Phase 7 made gold's invariants stop the
+pipeline when they break; on their first runs they caught two silent bugs.
 
 Phase 6 asked: can a model beat one rule ("heart disease or stroke on the
 admit day") at spotting 30-day readmissions? Trained on stays
@@ -20,6 +21,69 @@ pointed the model's way, on 17 readmissions, too few to judge. The phase's
 real product is the platform around the model: experiments, a registry,
 batch scoring and a drift monitor, which says the 2020-2026 patients are
 older and sicker than the ones the model learned from.
+
+## What phase 8 produced
+
+**One dashboard page for a hospital quality and operations director.** It
+answers how busy the network was, how long patients stayed, what a stay
+cost, how often patients came back and whether care gaps are closing,
+overall and by payer and hospital.
+
+![Operations overview](docs/img/dashboard.png)
+
+- **KPI tiles against a benchmark:** visits, hospital stays, average length
+  of stay and cost per stay for the last 12 complete months, each against
+  the 12 before. Once a payer or hospital is chosen, there is a gap to the
+  network average.
+- **Filters** for payer, hospital and visit type. Trends by month (visits)
+  and by quarter (length of stay and cost, because 40 stays a month is
+  noise). Variation tables by payer and by hospital. Care-gap closure for
+  three HEDIS-style measures.
+- **The readmission tile uses wide periods** (2020-2026 against
+  2010-2019). Readmissions are rare enough that 12 months would almost
+  always hold 1-10, a number the project never shows (D66, D70).
+
+**What the last 12 months show** (Aug 2025 - Jul 2026, whole network,
+synthetic data)
+1. **More stays, cheaper and shorter.** Hospital stays rose 6.0% (497
+   against 469) while cost per stay fell 7.2% ($24.2K against $26.0K) and
+   the average stay shortened from 5.4 to 5.2 days. Visits were flat.
+2. **Medicare is half the inpatient book and the costliest:** 243 of 497
+   stays at $32,034 per stay. Medicaid and Dual Eligible stays run longest
+   (6.4 and 6.2 days, against 5.2).
+3. **Blood pressure control is the widest care gap:** 67.0% of 2,135
+   eligible patients, against 82.9% for HbA1c testing and 97.7% for statins.
+
+**What to do about it**
+1. **Start hypertension outreach.** It is the biggest gap on the largest
+   group. Measure it by this closure rate in the next measure year.
+2. **Review discharge planning for Medicaid and Dual Eligible stays.** Watch
+   their length of stay against the network's.
+3. **Check case mix before crediting the cost fall.** Cost per stay swings by
+   quarter, and every hospital row but the largest rests on 11-16 stays.
+
+**How it is built:**
+- **Every KPI is defined once.** The dashboard reads the same Unity Catalog
+  metric views as Genie and the text-to-SQL test. `metrics.operations` and
+  `metrics.care_gaps` are new. `metrics.stays` gained hospital, payer,
+  month, cost and length of stay, which `readmission_events` now computes for
+  every stay. It moved there from the model's table, and that table was
+  proved unchanged to the cent.
+- **Small numbers are hidden by construction.** Every number a dataset
+  returns passes through one SQL function, `metrics.shown()`. Filters are
+  query parameters, so the rule sees the filtered group. The payer table sits
+  beside its own total (the stays tile), so it also hides as few further
+  payers as it takes for a hidden one to hold anything from 1 to 10 stays
+  (secondary suppression with a protection interval). On the default view,
+  no other table or chart has a hidden cell that a total could give back
+  (checked). A pytest reads the dashboard file and checks its shape: every
+  number is one `shown()` call, every dataset applies its filters, nothing
+  wraps the final query, the payer table keeps its suppression, and no
+  widget re-adds rows.
+- **The dashboard is code.** `dashboards/operations.lvdash.json` deploys with
+  `databricks bundle deploy`, like the pipeline. Behind the workspace login
+  the screenshot carries it. It reads `healthcare_dev` and is deployed to dev
+  only.
 
 ## What phase 7 produced
 
@@ -347,6 +411,7 @@ there is none.
 | Bundle `mode: production` | Enabled, enforcing run-as and deployment rules | Omitted — its `run_as` requirements cannot be met by a single-user Free Edition account |
 | One active pipeline per type | A pipeline per medallion layer | One pipeline containing all layers |
 | Quota shuts down compute daily | Autoscaling production clusters | Dev tier of ~1,000 patients, plus a second batch of ~11,000 generated on the laptop as CSV only (D65); large runs are manual and deliberate |
+| AI/BI dashboards sit behind the workspace login | A published dashboard shared with the business | The dashboard ships as code and is deployed by the bundle; the README carries a screenshot of the default network view |
 | Databricks Apps for internal hosting | An App behind workspace SSO | Streamlit Community Cloud — Apps sit behind workspace auth and stop after 24h |
 | One account, which owns every object | A service principal owns `ops`; analysts get `SELECT` on `silver` and nothing on `ops` | A row in `ops.phi_clearance`. **Separation of duties is impossible here, not merely weak** — there is one principal and it owns everything, so the masks demonstrate a mechanism and enforce nothing against their owner. A second principal is the fix; `REVOKE` is not |
 | One state in the dataset | Row filters segregate by region | The filter works and is verified, but with every patient in Massachusetts it can only be all-rows or no-rows |

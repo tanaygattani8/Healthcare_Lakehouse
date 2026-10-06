@@ -1,5 +1,7 @@
 -- Phase 7's proof for the two tables that went wrong mid-phase (E58, E59),
--- beyond the fingerprint. Every count must be 0.
+-- beyond the fingerprint. Every count must be 0. A record of phase 7:
+-- readmission_events gained four columns in phase 8, so the current form of
+-- the events proof is sql/phase8_proof.sql.
 
 -- readmission_events: E58's fix restored it (its fingerprint matches the
 -- before-record); this also proves it against the independent PySpark build.

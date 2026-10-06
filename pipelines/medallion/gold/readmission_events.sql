@@ -9,9 +9,13 @@ CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_events (
     -- Every stay is either an index stay or excluded for a named reason.
     CONSTRAINT index_flag_known EXPECT (is_index_stay IS NOT NULL) ON VIOLATION FAIL UPDATE,
     -- A duplicated stay fails here, before the table is replaced (E59).
-    CONSTRAINT one_row_per_stay EXPECT (key_copies = 1) ON VIOLATION FAIL UPDATE
+    CONSTRAINT one_row_per_stay EXPECT (key_copies = 1) ON VIOLATION FAIL UPDATE,
+    -- Phase 8: every stay has a cost, a hospital and a payer (its first encounter's).
+    CONSTRAINT stay_cost_present EXPECT (stay_claim_cost IS NOT NULL) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT stay_has_hospital_and_payer EXPECT (organization_id IS NOT NULL AND payer_id IS NOT NULL) ON VIOLATION FAIL UPDATE,
+    CONSTRAINT length_not_negative EXPECT (length_of_stay_days >= 0) ON VIOLATION FAIL UPDATE
 )
-COMMENT "One row per hospital stay (overlapping and same-day encounters merged). Every exclusion is its own column."
+COMMENT "One row per hospital stay (overlapping and same-day encounters merged). Every exclusion is its own column. Stay cost, length of stay, hospital and payer for every stay (phase 8)."
 TBLPROPERTIES ("quality" = "gold")
 AS
 WITH inp AS (
@@ -103,6 +107,20 @@ stays_p AS (
     LEFT JOIN planned_surgery ps ON ps.patient_id = s.patient_id AND ps.stay_no = s.stay_no
 ),
 
+-- Phase 8: the claim cost of every stay, not only index stays. Moved here
+-- unchanged from readmission_signals, which now reads it, so the dashboard
+-- and the model share one definition.
+stay_cost AS (
+    SELECT s.patient_id, s.stay_no, sum(f.total_claim_cost) AS stay_claim_cost
+    FROM stays s
+    JOIN ${catalog}.gold.fact_encounter f
+      ON f.patient_id = s.patient_id
+     AND f.readmission_role = 'index_eligible'
+     AND to_date(from_utc_timestamp(f.started_at, 'America/Chicago'))
+         BETWEEN s.admit_day AND s.discharge_day
+    GROUP BY s.patient_id, s.stay_no
+),
+
 -- The end of the data: the last visit of any kind, not just the last
 -- hospital stay (the gate used the latter, which ends the data early).
 data_end AS (
@@ -162,6 +180,11 @@ SELECT s.patient_id,
             OR datediff(d.last_day, s.discharge_day) < 30
             OR th.stay_no IS NOT NULL
             OR s.cancer_treatment)                                 AS is_index_stay,
+       -- Phase 8: the stay's hospital and payer are its first encounter's.
+       fe.organization_id,
+       fe.payer_id,
+       datediff(s.discharge_day, s.admit_day)                      AS length_of_stay_days,
+       sc.stay_claim_cost,
        -- The one-row-per-stay gate reads it (E59).
        count(*) OVER (PARTITION BY s.patient_id, s.stay_no)        AS key_copies
 FROM stays_p s
@@ -169,4 +192,6 @@ CROSS JOIN data_end d
 JOIN ${catalog}.silver.patient p       ON p.patient_id = s.patient_id
 LEFT JOIN unplanned_return ur          ON ur.patient_id = s.patient_id AND ur.stay_no = s.stay_no
 LEFT JOIN any_next nx                  ON nx.patient_id = s.patient_id AND nx.stay_no = s.stay_no
-LEFT JOIN to_hospice th                ON th.patient_id = s.patient_id AND th.stay_no = s.stay_no;
+LEFT JOIN to_hospice th                ON th.patient_id = s.patient_id AND th.stay_no = s.stay_no
+LEFT JOIN ${catalog}.gold.fact_encounter fe ON fe.encounter_id = s.first_encounter_id
+LEFT JOIN stay_cost sc                 ON sc.patient_id = s.patient_id AND sc.stay_no = s.stay_no;

@@ -37,12 +37,15 @@ Question: {question}"""
 
 # D67: the first note read as "always select the dimensions", and never said
 # what MEASURE() accepts; 7 of metrics' 11 dev-1 failures came from that.
+# D74: after phase 8 added two views, it wrote "GROUP BY ALL age_band" (dev-3,
+# dev-4), so the note now says nothing follows GROUP BY ALL.
 METRICS_NOTE = """The tables are metric views. In a query on a metric view:
 - MEASURE() takes only the name of a measure, such as MEASURE(stays). Put no
   expression or other function inside it; round or combine outside it, such as
   round(MEASURE(stays) / 1000, 1).
-- Select a dimension only to break a number down by it, then GROUP BY ALL. For
-  one overall number, select only measures and leave out GROUP BY.
+- Select a dimension only to break a number down by it, then end the query with
+  GROUP BY ALL and nothing after it. For one overall number, select only
+  measures and leave out GROUP BY.
 - To count only some rows, filter on a dimension with WHERE.
 For example:
 SELECT is_planned, MEASURE(stays) FROM healthcare_dev.metrics.stays GROUP BY ALL

@@ -12,14 +12,33 @@ WITH METRICS
 LANGUAGE YAML
 AS $$
 version: 1.1
-comment: "Every hospital stay (overlapping and same-day inpatient encounters merged into one), and why some cannot start a 30-day window."
+comment: "Every hospital stay (overlapping and same-day inpatient encounters merged into one), and why some cannot start a 30-day window. Phase 8 adds cost, length of stay, hospital and payer."
 source: healthcare_dev.gold.readmission_events
+joins:
+  - name: org
+    source: healthcare_dev.gold.dim_organization
+    on: source.organization_id = org.organization_id
+  - name: pay
+    source: healthcare_dev.gold.dim_payer
+    on: source.payer_id = pay.payer_id
 dimensions:
   - name: admit_year
     expr: year(from_utc_timestamp(admitted_at, 'America/Chicago'))
   - name: is_planned
     expr: is_planned
     comment: "Planned: began for a planned reason, or included chemotherapy (D64) or a scheduled heart operation (D68). A planned return is not a readmission."
+  - name: admit_month
+    expr: trunc(to_date(from_utc_timestamp(admitted_at, 'America/Chicago')), 'MM')
+    comment: "First day of the month the stay began, Chicago time."
+  - name: admit_quarter
+    expr: trunc(to_date(from_utc_timestamp(admitted_at, 'America/Chicago')), 'QUARTER')
+    comment: "First day of the quarter the stay began, Chicago time."
+  - name: hospital
+    expr: concat_ws(', ', org.name, org.city)
+    comment: "The hospital of the first encounter in the stay, as name and city."
+  - name: payer
+    expr: pay.name
+    comment: "The payer of the first encounter in the stay."
 measures:
   - name: stays
     expr: count(*)
@@ -39,6 +58,15 @@ measures:
   - name: index_stays
     expr: count_if(is_index_stay)
     comment: "Stays that can start a 30-day window."
+  - name: stay_cost
+    expr: sum(stay_claim_cost)
+    comment: "Claim cost of the stays, in dollars."
+  - name: cost_per_stay
+    expr: try_divide(sum(stay_claim_cost), count(*))
+    comment: "Claim cost per stay, in dollars. Every stay, not only index stays."
+  - name: avg_length_of_stay_days
+    expr: avg(length_of_stay_days)
+    comment: "Days from admit day to discharge day, Chicago time. Every stay."
 $$;
 
 CREATE OR REPLACE VIEW healthcare_dev.metrics.readmission
@@ -110,4 +138,62 @@ measures:
     comment: "Claim cost of the stays that made index stays into readmissions, in dollars."
   - name: avg_length_of_stay_days
     expr: avg(length_of_stay_days)
+$$;
+
+CREATE OR REPLACE VIEW healthcare_dev.metrics.operations
+WITH METRICS
+LANGUAGE YAML
+AS $$
+version: 1.1
+comment: "Phase 8. Every visit of any kind, for the operations dashboard."
+source: healthcare_dev.gold.fact_encounter
+joins:
+  - name: org
+    source: healthcare_dev.gold.dim_organization
+    on: source.organization_id = org.organization_id
+  - name: pay
+    source: healthcare_dev.gold.dim_payer
+    on: source.payer_id = pay.payer_id
+dimensions:
+  - name: visit_month
+    expr: trunc(to_date(from_utc_timestamp(source.started_at, 'America/Chicago')), 'MM')
+    comment: "First day of the month the visit started, Chicago time."
+  - name: visit_type
+    expr: source.encounter_class
+    comment: "The visit class as recorded: ambulatory, wellness, outpatient, emergency, inpatient, urgentcare and others."
+  - name: hospital
+    expr: concat_ws(', ', org.name, org.city)
+    comment: "The organization that held the visit, as name and city."
+  - name: payer
+    expr: pay.name
+measures:
+  - name: visits
+    expr: count(*)
+  - name: patients
+    expr: count(DISTINCT source.patient_id)
+$$;
+
+CREATE OR REPLACE VIEW healthcare_dev.metrics.care_gaps
+WITH METRICS
+LANGUAGE YAML
+AS $$
+version: 1.1
+comment: "Phase 8. Three HEDIS-style care-gap measures, simplified, for the one measure year in gold."
+source: healthcare_dev.gold.care_gap
+dimensions:
+  - name: measure
+    expr: measure
+    comment: "diabetes_hba1c, bp_control or statin_therapy."
+  - name: measure_year
+    expr: measure_year
+measures:
+  - name: eligible
+    expr: count_if(NOT (excl_age OR excl_died OR excl_hospice))
+    comment: "In the measure and not excused by age, death or hospice."
+  - name: closed
+    expr: count_if(NOT (excl_age OR excl_died OR excl_hospice) AND numerator_met)
+    comment: "Eligible and got the care the measure asks for."
+  - name: closure_rate_pct
+    expr: 100 * try_divide(count_if(NOT (excl_age OR excl_died OR excl_hospice) AND numerator_met), count_if(NOT (excl_age OR excl_died OR excl_hospice)))
+    comment: "Closed as a percentage of eligible. Not rounded."
 $$;

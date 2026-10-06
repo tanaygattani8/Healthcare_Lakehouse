@@ -2493,3 +2493,155 @@ can read `information_schema`, so "gold carries no governed tag" is a gate.
 days, and only the gates caught them. The PySpark reconciliation would
 have too, but it runs by hand. A retrain-on-drift DAG must not train on a
 table no gate has checked.
+
+### D74 — phase 8: the AI/BI operations dashboard
+
+**Why.** The analytics answered "why are patients readmitted?" well, but
+showed little of what an analyst job asks for: KPIs against a benchmark,
+filters, trends, variation, and a "so what". One Databricks AI/BI page
+closes that gap. It displaces nothing in the pipeline, and Airflow depth
+and retrain-on-drift (D71's handover) move to phase 9. Its reader is a
+hospital quality and operations director.
+
+**What it shows.**
+- **Tiles:** visits, stays, average length of stay and cost per stay. Each
+  covers the last 12 complete months, with the 12 before it as the
+  counter's comparison value.
+- **The 30-day readmission rate uses D70's periods** (2020-2026 against
+  2010-2019). At about 500 stays a year, 12 months would almost always hold
+  1-10 readmissions, so the tile would always be hidden.
+- **Care-gap closure** for three measures, for the one measure year in gold.
+- **A table of changes and gaps to the network**, a visits chart by month
+  and type, and length of stay and cost by quarter (monthly is noise at
+  about 40 stays).
+- **Payer and hospital tables**, and an executive summary of three findings
+  and three recommendations, quoted only from numbers the default view
+  shows.
+- **No readmissions by payer or hospital.** One hospital has 11+
+  readmissions, and `readmission_signals` has no payer.
+
+**The windows are computed, never typed.** `metrics.kpi_window` takes the
+last day of data (2026-08-14). The last complete month is July 2026, so the
+window is Aug 2025 - Jul 2026.
+
+**Gold: stay cost and length of stay for every stay.** They existed only
+for index stays, inside `readmission_signals`, which left out the stays
+that end in death, hospice or cancer treatment. The `stay_cost` logic
+moved, unchanged, into `readmission_events`. That table gained
+`organization_id` and `payer_id` (the first encounter's), plus
+`length_of_stay_days` and `stay_claim_cost`, and three NULL-safe gates.
+`readmission_signals` now reads cost and length of stay from it. **The
+proof:** all 12 gold fingerprints match before and after (the four new
+columns left out). `EXCEPT ALL` reads 0 both ways for `readmission_events`
+against the PySpark build, and for `readmission_signals` against its
+before-copy.
+
+**The metrics layer.**
+- **New views:** `metrics.operations` (visits by month, type, hospital and
+  payer) and `metrics.care_gaps`.
+- **`metrics.stays` gained** month, quarter, hospital and payer, plus
+  `stay_cost`, `cost_per_stay` and `avg_length_of_stay_days`. Its old
+  numbers are unchanged.
+- **Joins work on Free Edition.** Hospital and payer come in as star joins
+  (`joins:`) in the metric views (probe c). The new `check_metrics.sql`
+  checks show every visit, stay and dollar counted once after the joins,
+  with none unnamed.
+
+**The privacy rule.** It is wider than D66: any count of 1-10, and any
+number over a group of 1-10, is NULL.
+- **One function, nested.** `metrics.shown(n, value)` returns NULL when
+  `n` is 1-10 or unknown. A number that depends on several counts nests
+  one `shown()` per count. A rate is
+  `shown(numerator, shown(rest_of_group, rate))`, which also stops a rate
+  plus a visible group size from giving a small count back.
+- **Filters are query parameters,** not dashboard filters, so the rule sees
+  the filtered group.
+- **Secondary suppression, in the payer table only (E61).** It sits beside
+  its own total, so it hides the fewest further payers that leave a hidden
+  one free to hold anything from 1 to 10 stays (a protection interval). On
+  the default view that is five of ten payers. Checked on the default view:
+  - the hospital table's leftover is not 1-10;
+  - the visits chart and the quarterly stays chart have no hidden cell.
+
+  No other dataset carries secondary suppression.
+- **What the test checks.** `tests/test_dashboard_privacy.py` reads the
+  exported dashboard. It checks:
+  - each returned number is one `shown()` call;
+  - each dataset applies the filters it must (comments stripped);
+  - nothing wraps the query after `FROM final`;
+  - `by_payer` keeps `privacy_n`;
+  - no widget re-aggregates rows.
+
+  It does not check that the count passed to `shown()` is the right one.
+  That rests on review.
+- **The boundary.** Inside the dashboard, which is private behind the
+  workspace login, recovering a hidden cell by comparing two filtered views
+  is accepted. Choosing one of the protective payers, for example, shows its
+  own count. The public outputs (the README screenshot and summary) show the
+  default network view only.
+- **The filter check (spec §7) was run in SQL,** not in the UI: choosing the
+  small payer turns the stay tiles NULL.
+
+**The dashboard is code.**
+- It was built through the Lakeview API from the plan's SQL, then exported
+  with `bundle generate dashboard`, bound with `bundle deployment bind`, and
+  deployed by `bundle deploy -t dev`.
+- `parent_path` pins its folder. Without it, the deploy wanted to delete and
+  recreate the dashboard with a new id and URL (E62).
+- After a UI edit, re-export before committing, or the next deploy
+  overwrites the edit.
+- The executive summary was added by editing the JSON and deploying it.
+- Databricks showed an "Automated browser control detected" banner during
+  the visual check, so later visual checks are by hand.
+
+**Probes.**
+- **a:** the data ends mid-month (2026-08-14).
+- **b:** the counter has a comparison value.
+- **c:** star joins work in a metric view.
+- **d:** a parameter and a scalar subquery work in a metric view's `WHERE`.
+- **e:** the CLI generates and binds dashboards.
+
+**Departures from the spec.**
+- No `warehouse_id` variable: each re-export rewrites the resource file.
+- The hospital table lists only hospitals with 11+ stays, rather than about
+  150 rows that are mostly blank.
+- Secondary suppression (E61).
+- `shown()` and `kpi_window` live in `sql/dashboard_support.sql`, not in
+  `metric_views.sql` (E60).
+- Rare visit types fold into `other` (seven series; the dataviz rule caps a
+  stacked chart at eight).
+- Hidden cells read `null`, because AI/BI shows NULL that way, and the page
+  says so.
+
+**The text-to-SQL contestant, after the metrics layer grew.**
+
+| Run | metrics | raw | What changed |
+|---|---|---|---|
+| dev-2 (baseline) | 16 | 12 | |
+| dev-3 | 13 | 12 | it used `shown()` (E60) |
+| dev-4 | 15 | 12 | `shown()` moved out |
+| dev-5 | 16 | 12 | `METRICS_NOTE`: nothing follows GROUP BY ALL |
+
+dev-5 fails exactly dev-2's four questions. The bar was "no repeatable new
+failure", because `raw` flips about 3 of 20 verdicts between identical runs.
+The phase 5 test runs used the earlier note and views.
+
+**Limits.**
+- **Some "hospitals" are outpatient clinics.** Synthea puts some inpatient
+  encounters at clinics, and the largest row in the hospital table is one.
+- **Every hospital row but the largest rests on 11-16 stays.** Their cost gaps to the network
+  (one is 91% below) are too thin to act on one by one, and the summary
+  says so.
+- **The 30-day readmission rate (1.39% for 2020-2026) is far below
+  real-world levels,** because the data is synthetic.
+- **The executive summary is a dated snapshot.** Its window (Aug 2025 - Jul
+  2026) and numbers were written by hand from this data load. The widget
+  descriptions say only "last 12 complete months", which `kpi_window`
+  computes.
+- **The dashboard is dev only.** It reads `healthcare_dev`, and
+  `include: resources/*.yml` would also add it to a prod deploy, which this
+  project never runs.
+- **The checks behind "none unnamed".** `check_metrics.sql` counts an empty
+  hospital name as unnamed. A missing organization gives `''` under
+  `concat_ws`, not NULL. Stay costs are checked against `fact_encounter`
+  (each hospital encounter's cost lands in exactly one stay).

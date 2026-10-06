@@ -57,22 +57,12 @@ WITH stays AS (
     FROM ${catalog}.gold.readmission_events
 ),
 
-stay_cost AS (
-    SELECT s.patient_id, s.stay_no, sum(f.total_claim_cost) AS stay_claim_cost
-    FROM stays s
-    JOIN ${catalog}.gold.fact_encounter f
-      ON f.patient_id = s.patient_id
-     AND f.readmission_role = 'index_eligible'
-     AND to_date(from_utc_timestamp(f.started_at, 'America/Chicago'))
-         BETWEEN s.admit_day AND s.discharge_day
-    GROUP BY s.patient_id, s.stay_no
-),
-
+-- Stay cost and length of stay come from readmission_events (phase 8),
+-- which computes them for every stay.
 idx AS (
-    SELECT s.*, c.stay_claim_cost
-    FROM stays s
-    JOIN stay_cost c ON c.patient_id = s.patient_id AND c.stay_no = s.stay_no
-    WHERE s.is_index_stay
+    SELECT *
+    FROM stays
+    WHERE is_index_stay
 ),
 
 conds AS (
@@ -126,14 +116,13 @@ followup AS (
 
 -- The unplanned stay that made this one a readmission, for its cost.
 return_cost AS (
-    SELECT i.patient_id, i.stay_no, c.stay_claim_cost AS outcome_return_stay_cost
+    SELECT i.patient_id, i.stay_no, b.stay_claim_cost AS outcome_return_stay_cost
     FROM idx i
     JOIN stays b
       ON b.patient_id = i.patient_id
      AND b.stay_no > i.stay_no
      AND NOT b.is_planned
      AND datediff(b.admit_day, i.discharge_day) = i.days_to_unplanned_return
-    JOIN stay_cost c ON c.patient_id = b.patient_id AND c.stay_no = b.stay_no
 ),
 
 -- Phase 6 (spec §2): a coronary bypass, emergency included, from the day
@@ -185,7 +174,7 @@ joined AS (
            coalesce(c.conditions_at_admit, 0)                               AS conditions_at_admit,
            coalesce(i.admit_reason, 'no reason recorded')                   AS admit_reason,
            i.is_planned,
-           datediff(i.discharge_day, i.admit_day)                           AS length_of_stay_days,
+           i.length_of_stay_days,
            ps.prior_stays_12m,
            pe.prior_emergency_12m,
            i.encounters_in_stay,

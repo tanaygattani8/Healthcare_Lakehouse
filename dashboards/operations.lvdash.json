@@ -1,0 +1,1961 @@
+{
+  "datasets": [
+    {
+      "displayName": "payers",
+      "name": "payers",
+      "queryLines": [
+        "WITH v AS (\n",
+        "    SELECT payer, MEASURE(visits) AS visits\n",
+        "    FROM healthcare_dev.metrics.operations\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "final AS (\n",
+        "    SELECT 'All' AS payer\n",
+        "    UNION ALL\n",
+        "    SELECT payer FROM v WHERE payer IS NOT NULL\n",
+        ")\n",
+        "SELECT payer\n",
+        "FROM final\n",
+        "ORDER BY payer <> 'All', payer"
+      ]
+    },
+    {
+      "displayName": "hospitals",
+      "name": "hospitals",
+      "queryLines": [
+        "WITH v AS (\n",
+        "    SELECT hospital, MEASURE(visits) AS visits\n",
+        "    FROM healthcare_dev.metrics.operations\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "final AS (\n",
+        "    SELECT 'All' AS hospital\n",
+        "    UNION ALL\n",
+        "    SELECT hospital FROM v WHERE hospital IS NOT NULL\n",
+        ")\n",
+        "SELECT hospital\n",
+        "FROM final\n",
+        "ORDER BY hospital <> 'All', hospital"
+      ]
+    },
+    {
+      "displayName": "visit_types",
+      "name": "visit_types",
+      "queryLines": [
+        "WITH v AS (\n",
+        "    SELECT visit_type, MEASURE(visits) AS visits\n",
+        "    FROM healthcare_dev.metrics.operations\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "final AS (\n",
+        "    SELECT 'All' AS visit_type\n",
+        "    UNION ALL\n",
+        "    SELECT visit_type FROM v WHERE visit_type IS NOT NULL\n",
+        ")\n",
+        "SELECT visit_type\n",
+        "FROM final\n",
+        "ORDER BY visit_type <> 'All', visit_type"
+      ]
+    },
+    {
+      "displayName": "kpi_visits",
+      "name": "kpi_visits",
+      "parameters": [
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "payer",
+          "keyword": "payer"
+        },
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "hospital",
+          "keyword": "hospital"
+        },
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "visit_type",
+          "keyword": "visit_type"
+        }
+      ],
+      "queryLines": [
+        "WITH picked AS (\n",
+        "    SELECT visit_month, MEASURE(visits) AS visits\n",
+        "    FROM healthcare_dev.metrics.operations\n",
+        "    WHERE (:payer = 'All' OR payer = :payer)\n",
+        "      AND (:hospital = 'All' OR hospital = :hospital)\n",
+        "      AND (:visit_type = 'All' OR visit_type = :visit_type)\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "network AS (\n",
+        "    SELECT visit_month, MEASURE(visits) AS visits\n",
+        "    FROM healthcare_dev.metrics.operations\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "sums AS (\n",
+        "    SELECT coalesce(sum(CASE WHEN p.visit_month BETWEEN w.window_start AND w.last_month THEN p.visits END), 0) AS last_12,\n",
+        "           coalesce(sum(CASE WHEN p.visit_month BETWEEN w.prior_start AND w.prior_end THEN p.visits END), 0) AS prior_12\n",
+        "    FROM picked p CROSS JOIN healthcare_dev.metrics.kpi_window w\n",
+        "),\n",
+        "net AS (\n",
+        "    SELECT sum(CASE WHEN n.visit_month BETWEEN w.window_start AND w.last_month THEN n.visits END) AS network_12\n",
+        "    FROM network n CROSS JOIN healthcare_dev.metrics.kpi_window w\n",
+        "),\n",
+        "final AS (\n",
+        "    SELECT * FROM sums CROSS JOIN net\n",
+        ")\n",
+        "SELECT healthcare_dev.metrics.shown(last_12, last_12) AS visits,\n",
+        "       healthcare_dev.metrics.shown(prior_12, prior_12) AS visits_prior,\n",
+        "       healthcare_dev.metrics.shown(last_12, healthcare_dev.metrics.shown(prior_12, round(100 * try_divide(last_12 - prior_12, prior_12), 1))) AS visits_change_pct,\n",
+        "       healthcare_dev.metrics.shown(last_12, healthcare_dev.metrics.shown(network_12, round(100 * try_divide(last_12, network_12), 1))) AS visits_share_of_network_pct\n",
+        "FROM final"
+      ]
+    },
+    {
+      "displayName": "kpi_stays",
+      "name": "kpi_stays",
+      "parameters": [
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "payer",
+          "keyword": "payer"
+        },
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "hospital",
+          "keyword": "hospital"
+        }
+      ],
+      "queryLines": [
+        "WITH picked_last AS (\n",
+        "    SELECT MEASURE(stays) AS stays, MEASURE(avg_length_of_stay_days) AS los, MEASURE(cost_per_stay) AS cost\n",
+        "    FROM healthcare_dev.metrics.stays\n",
+        "    WHERE admit_month BETWEEN (SELECT window_start FROM healthcare_dev.metrics.kpi_window)\n",
+        "                          AND (SELECT last_month FROM healthcare_dev.metrics.kpi_window)\n",
+        "      AND (:payer = 'All' OR payer = :payer)\n",
+        "      AND (:hospital = 'All' OR hospital = :hospital)\n",
+        "),\n",
+        "picked_prior AS (\n",
+        "    SELECT MEASURE(stays) AS stays, MEASURE(avg_length_of_stay_days) AS los, MEASURE(cost_per_stay) AS cost\n",
+        "    FROM healthcare_dev.metrics.stays\n",
+        "    WHERE admit_month BETWEEN (SELECT prior_start FROM healthcare_dev.metrics.kpi_window)\n",
+        "                          AND (SELECT prior_end FROM healthcare_dev.metrics.kpi_window)\n",
+        "      AND (:payer = 'All' OR payer = :payer)\n",
+        "      AND (:hospital = 'All' OR hospital = :hospital)\n",
+        "),\n",
+        "network_last AS (\n",
+        "    SELECT MEASURE(stays) AS stays, MEASURE(avg_length_of_stay_days) AS los, MEASURE(cost_per_stay) AS cost\n",
+        "    FROM healthcare_dev.metrics.stays\n",
+        "    WHERE admit_month BETWEEN (SELECT window_start FROM healthcare_dev.metrics.kpi_window)\n",
+        "                          AND (SELECT last_month FROM healthcare_dev.metrics.kpi_window)\n",
+        "),\n",
+        "final AS (\n",
+        "    SELECT l.stays, l.los, l.cost,\n",
+        "           p.stays AS prior_stays, p.los AS prior_los, p.cost AS prior_cost,\n",
+        "           n.stays AS network_stays, n.los AS network_los, n.cost AS network_cost\n",
+        "    FROM picked_last l CROSS JOIN picked_prior p CROSS JOIN network_last n\n",
+        ")\n",
+        "SELECT healthcare_dev.metrics.shown(stays, stays) AS stays,\n",
+        "       healthcare_dev.metrics.shown(prior_stays, prior_stays) AS stays_prior,\n",
+        "       healthcare_dev.metrics.shown(stays, healthcare_dev.metrics.shown(prior_stays, round(100 * try_divide(stays - prior_stays, prior_stays), 1))) AS stays_change_pct,\n",
+        "       healthcare_dev.metrics.shown(stays, round(los, 1)) AS avg_length_of_stay_days,\n",
+        "       healthcare_dev.metrics.shown(prior_stays, round(prior_los, 1)) AS avg_length_of_stay_days_prior,\n",
+        "       healthcare_dev.metrics.shown(stays, healthcare_dev.metrics.shown(prior_stays, round(los - prior_los, 1))) AS length_of_stay_change_days,\n",
+        "       healthcare_dev.metrics.shown(stays, healthcare_dev.metrics.shown(network_stays, round(los - network_los, 1))) AS length_of_stay_vs_network_days,\n",
+        "       healthcare_dev.metrics.shown(stays, round(cost, 0)) AS cost_per_stay,\n",
+        "       healthcare_dev.metrics.shown(prior_stays, round(prior_cost, 0)) AS cost_per_stay_prior,\n",
+        "       healthcare_dev.metrics.shown(stays, healthcare_dev.metrics.shown(prior_stays, round(100 * try_divide(cost - prior_cost, prior_cost), 1))) AS cost_change_pct,\n",
+        "       healthcare_dev.metrics.shown(stays, healthcare_dev.metrics.shown(network_stays, round(100 * try_divide(cost - network_cost, network_cost), 1))) AS cost_vs_network_pct\n",
+        "FROM final"
+      ]
+    },
+    {
+      "displayName": "kpi_readmission",
+      "name": "kpi_readmission",
+      "queryLines": [
+        "WITH r AS (\n",
+        "    SELECT admit_period, MEASURE(index_stays) AS index_stays, MEASURE(readmitted) AS readmitted,\n",
+        "           MEASURE(readmission_rate_pct) AS rate\n",
+        "    FROM healthcare_dev.metrics.readmission\n",
+        "    WHERE admit_period IN ('2010-2019', '2020-2026')\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "final AS (\n",
+        "    SELECT max(CASE WHEN admit_period = '2020-2026' THEN index_stays END) AS stays_now,\n",
+        "           max(CASE WHEN admit_period = '2020-2026' THEN readmitted END) AS readmitted_now,\n",
+        "           max(CASE WHEN admit_period = '2020-2026' THEN rate END) AS rate_now,\n",
+        "           max(CASE WHEN admit_period = '2010-2019' THEN index_stays END) AS stays_before,\n",
+        "           max(CASE WHEN admit_period = '2010-2019' THEN readmitted END) AS readmitted_before,\n",
+        "           max(CASE WHEN admit_period = '2010-2019' THEN rate END) AS rate_before\n",
+        "    FROM r\n",
+        ")\n",
+        "SELECT healthcare_dev.metrics.shown(readmitted_now, healthcare_dev.metrics.shown(stays_now - readmitted_now, round(rate_now, 2))) AS readmission_rate_pct_2020_2026,\n",
+        "       healthcare_dev.metrics.shown(readmitted_before, healthcare_dev.metrics.shown(stays_before - readmitted_before, round(rate_before, 2))) AS readmission_rate_pct_2010_2019\n",
+        "FROM final"
+      ]
+    },
+    {
+      "displayName": "care_gaps",
+      "name": "care_gaps",
+      "queryLines": [
+        "WITH g AS (\n",
+        "    SELECT measure, measure_year, MEASURE(eligible) AS eligible, MEASURE(closed) AS closed,\n",
+        "           MEASURE(closure_rate_pct) AS rate\n",
+        "    FROM healthcare_dev.metrics.care_gaps\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "final AS (\n",
+        "    SELECT CASE measure WHEN 'diabetes_hba1c' THEN 'Diabetes: HbA1c tested'\n",
+        "                        WHEN 'bp_control' THEN 'Hypertension: blood pressure controlled'\n",
+        "                        WHEN 'statin_therapy' THEN 'Heart disease: on a statin'\n",
+        "                        ELSE measure END AS measure,\n",
+        "           measure_year, eligible, closed, rate\n",
+        "    FROM g\n",
+        ")\n",
+        "SELECT measure,\n",
+        "       measure_year,\n",
+        "       healthcare_dev.metrics.shown(eligible, eligible) AS eligible,\n",
+        "       healthcare_dev.metrics.shown(closed, healthcare_dev.metrics.shown(eligible - closed, round(rate, 1))) AS closure_rate_pct\n",
+        "FROM final\n",
+        "ORDER BY measure"
+      ]
+    },
+    {
+      "displayName": "visits_trend",
+      "name": "visits_trend",
+      "parameters": [
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "payer",
+          "keyword": "payer"
+        },
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "hospital",
+          "keyword": "hospital"
+        },
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "visit_type",
+          "keyword": "visit_type"
+        }
+      ],
+      "queryLines": [
+        "WITH v AS (\n",
+        "    SELECT visit_month, visit_type, MEASURE(visits) AS visits\n",
+        "    FROM healthcare_dev.metrics.operations\n",
+        "    WHERE visit_month >= DATE'2018-01-01'\n",
+        "      AND visit_month <= (SELECT last_month FROM healthcare_dev.metrics.kpi_window)\n",
+        "      AND (:payer = 'All' OR payer = :payer)\n",
+        "      AND (:hospital = 'All' OR hospital = :hospital)\n",
+        "      AND (:visit_type = 'All' OR visit_type = :visit_type)\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "final AS (\n",
+        "    -- Six types by name; home, virtual, snf and hospice (under 2% of visits\n",
+        "    -- together) fold into other, so the chart keeps under eight series.\n",
+        "    SELECT visit_month,\n",
+        "           CASE WHEN visit_type IN ('ambulatory', 'wellness', 'outpatient', 'urgentcare', 'emergency', 'inpatient')\n",
+        "                THEN visit_type ELSE 'other' END AS visit_type,\n",
+        "           sum(visits) AS visits\n",
+        "    FROM v\n",
+        "    GROUP BY ALL\n",
+        ")\n",
+        "SELECT visit_month,\n",
+        "       visit_type,\n",
+        "       healthcare_dev.metrics.shown(visits, visits) AS visits\n",
+        "FROM final\n",
+        "ORDER BY visit_month, visit_type"
+      ]
+    },
+    {
+      "displayName": "stays_trend",
+      "name": "stays_trend",
+      "parameters": [
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "payer",
+          "keyword": "payer"
+        },
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "hospital",
+          "keyword": "hospital"
+        }
+      ],
+      "queryLines": [
+        "WITH final AS (\n",
+        "    SELECT admit_quarter, MEASURE(stays) AS stays, MEASURE(avg_length_of_stay_days) AS los,\n",
+        "           MEASURE(cost_per_stay) AS cost\n",
+        "    FROM healthcare_dev.metrics.stays\n",
+        "    WHERE admit_quarter >= DATE'2018-01-01'\n",
+        "      AND add_months(admit_quarter, 2) <= (SELECT last_month FROM healthcare_dev.metrics.kpi_window)\n",
+        "      AND (:payer = 'All' OR payer = :payer)\n",
+        "      AND (:hospital = 'All' OR hospital = :hospital)\n",
+        "    GROUP BY ALL\n",
+        ")\n",
+        "SELECT admit_quarter,\n",
+        "       healthcare_dev.metrics.shown(stays, stays) AS stays,\n",
+        "       healthcare_dev.metrics.shown(stays, round(los, 1)) AS avg_length_of_stay_days,\n",
+        "       healthcare_dev.metrics.shown(stays, round(cost, 0)) AS cost_per_stay\n",
+        "FROM final\n",
+        "ORDER BY admit_quarter"
+      ]
+    },
+    {
+      "displayName": "by_payer",
+      "name": "by_payer",
+      "parameters": [
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "payer",
+          "keyword": "payer"
+        },
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "hospital",
+          "keyword": "hospital"
+        }
+      ],
+      "queryLines": [
+        "WITH p AS (\n",
+        "    SELECT payer, MEASURE(stays) AS stays, MEASURE(avg_length_of_stay_days) AS los,\n",
+        "           MEASURE(cost_per_stay) AS cost\n",
+        "    FROM healthcare_dev.metrics.stays\n",
+        "    WHERE admit_month BETWEEN (SELECT window_start FROM healthcare_dev.metrics.kpi_window)\n",
+        "                          AND (SELECT last_month FROM healthcare_dev.metrics.kpi_window)\n",
+        "      AND (:payer = 'All' OR payer = :payer)\n",
+        "      AND (:hospital = 'All' OR hospital = :hospital)\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "ranked AS (\n",
+        "    SELECT *,\n",
+        "           sum(CASE WHEN stays BETWEEN 1 AND 10 THEN stays ELSE 0 END) OVER () AS small_sum,\n",
+        "           count_if(stays BETWEEN 1 AND 10) OVER () AS small_groups,\n",
+        "           CASE WHEN stays > 10 THEN row_number() OVER (PARTITION BY stays > 10 ORDER BY stays, payer) END AS big_rank,\n",
+        "           sum(stays) OVER (PARTITION BY stays > 10 ORDER BY stays, payer ROWS UNBOUNDED PRECEDING) AS big_cum,\n",
+        "           lead(stays) OVER (PARTITION BY stays > 10 ORDER BY stays, payer) AS next_big\n",
+        "    FROM p\n",
+        "),\n",
+        "protected AS (\n",
+        "    -- Secondary suppression with a protection interval (D72, E61). The\n",
+        "    -- stays tile minus the shown rows gives the hidden total L. A reader who\n",
+        "    -- knows this rule knows each hidden large payer holds 11 or more stays\n",
+        "    -- and no more than the smallest shown one (next_big). Hiding the j\n",
+        "    -- smallest large payers leaves the small total at least L - j * next_big.\n",
+        "    -- Hide the fewest that push that bound to 1 or below, so the small\n",
+        "    -- payers could hold anything from 1 to 10.\n",
+        "    SELECT *,\n",
+        "           min(CASE WHEN stays > 10\n",
+        "                     AND (next_big IS NULL OR small_sum + big_cum - big_rank * next_big <= 1)\n",
+        "                    THEN big_rank END) OVER () AS hide_through\n",
+        "    FROM ranked\n",
+        "),\n",
+        "final AS (\n",
+        "    -- A NULL privacy_n makes shown() return NULL.\n",
+        "    SELECT *,\n",
+        "           CASE WHEN small_groups > 0 AND big_rank <= hide_through THEN NULL ELSE stays END AS privacy_n\n",
+        "    FROM protected\n",
+        ")\n",
+        "SELECT payer,\n",
+        "       healthcare_dev.metrics.shown(privacy_n, stays) AS stays,\n",
+        "       healthcare_dev.metrics.shown(privacy_n, round(los, 1)) AS avg_length_of_stay_days,\n",
+        "       healthcare_dev.metrics.shown(privacy_n, round(cost, 0)) AS cost_per_stay\n",
+        "FROM final\n",
+        "ORDER BY stays DESC NULLS LAST"
+      ]
+    },
+    {
+      "displayName": "by_hospital",
+      "name": "by_hospital",
+      "parameters": [
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "payer",
+          "keyword": "payer"
+        },
+        {
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          },
+          "displayName": "hospital",
+          "keyword": "hospital"
+        }
+      ],
+      "queryLines": [
+        "WITH h AS (\n",
+        "    SELECT hospital, MEASURE(stays) AS stays, MEASURE(avg_length_of_stay_days) AS los,\n",
+        "           MEASURE(cost_per_stay) AS cost\n",
+        "    FROM healthcare_dev.metrics.stays\n",
+        "    WHERE admit_month BETWEEN (SELECT window_start FROM healthcare_dev.metrics.kpi_window)\n",
+        "                          AND (SELECT last_month FROM healthcare_dev.metrics.kpi_window)\n",
+        "      AND (:payer = 'All' OR payer = :payer)\n",
+        "      AND (:hospital = 'All' OR hospital = :hospital)\n",
+        "    GROUP BY ALL\n",
+        "),\n",
+        "n AS (\n",
+        "    SELECT MEASURE(stays) AS network_stays, MEASURE(avg_length_of_stay_days) AS network_los,\n",
+        "           MEASURE(cost_per_stay) AS network_cost\n",
+        "    FROM healthcare_dev.metrics.stays\n",
+        "    WHERE admit_month BETWEEN (SELECT window_start FROM healthcare_dev.metrics.kpi_window)\n",
+        "                          AND (SELECT last_month FROM healthcare_dev.metrics.kpi_window)\n",
+        "),\n",
+        "final AS (\n",
+        "    SELECT * FROM h CROSS JOIN n\n",
+        ")\n",
+        "SELECT hospital,\n",
+        "       healthcare_dev.metrics.shown(stays, stays) AS stays,\n",
+        "       healthcare_dev.metrics.shown(stays, round(los, 1)) AS avg_length_of_stay_days,\n",
+        "       healthcare_dev.metrics.shown(stays, healthcare_dev.metrics.shown(network_stays, round(los - network_los, 1))) AS length_of_stay_vs_network_days,\n",
+        "       healthcare_dev.metrics.shown(stays, round(cost, 0)) AS cost_per_stay,\n",
+        "       healthcare_dev.metrics.shown(stays, healthcare_dev.metrics.shown(network_stays, round(100 * try_divide(cost - network_cost, network_cost), 1))) AS cost_vs_network_pct\n",
+        "FROM final\n",
+        "WHERE stays > 10\n",
+        "ORDER BY stays DESC"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "displayName": "Operations overview",
+      "layout": [
+        {
+          "position": {
+            "height": 2,
+            "width": 6,
+            "x": 0,
+            "y": 0
+          },
+          "widget": {
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Operations overview\n",
+                "Hospital stays, visits, length of stay, cost and quality for one hospital network. Synthetic data (Synthea). **null = hidden**: a group of 1-10 stays, visits, readmissions or patients, or the smallest group beside a single hidden one. The readmission and care-gap figures cover the whole network and ignore the filters."
+              ]
+            },
+            "name": "title"
+          }
+        },
+        {
+          "position": {
+            "height": 1,
+            "width": 2,
+            "x": 0,
+            "y": 2
+          },
+          "widget": {
+            "name": "f_payer",
+            "queries": [
+              {
+                "name": "values",
+                "query": {
+                  "datasetName": "payers",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "expression": "`payer`",
+                      "name": "payer"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_kpi_visits",
+                "query": {
+                  "datasetName": "kpi_visits",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "payer",
+                      "name": "payer"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_visits_trend",
+                "query": {
+                  "datasetName": "visits_trend",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "payer",
+                      "name": "payer"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_kpi_stays",
+                "query": {
+                  "datasetName": "kpi_stays",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "payer",
+                      "name": "payer"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_stays_trend",
+                "query": {
+                  "datasetName": "stays_trend",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "payer",
+                      "name": "payer"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_by_payer",
+                "query": {
+                  "datasetName": "by_payer",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "payer",
+                      "name": "payer"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_by_hospital",
+                "query": {
+                  "datasetName": "by_hospital",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "payer",
+                      "name": "payer"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "fields": [
+                  {
+                    "displayName": "Payer",
+                    "fieldName": "payer",
+                    "queryName": "values"
+                  },
+                  {
+                    "parameterName": "payer",
+                    "queryName": "param_kpi_visits"
+                  },
+                  {
+                    "parameterName": "payer",
+                    "queryName": "param_visits_trend"
+                  },
+                  {
+                    "parameterName": "payer",
+                    "queryName": "param_kpi_stays"
+                  },
+                  {
+                    "parameterName": "payer",
+                    "queryName": "param_stays_trend"
+                  },
+                  {
+                    "parameterName": "payer",
+                    "queryName": "param_by_payer"
+                  },
+                  {
+                    "parameterName": "payer",
+                    "queryName": "param_by_hospital"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Payer"
+              },
+              "version": 2,
+              "widgetType": "filter-single-select"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 1,
+            "width": 2,
+            "x": 2,
+            "y": 2
+          },
+          "widget": {
+            "name": "f_hospital",
+            "queries": [
+              {
+                "name": "values",
+                "query": {
+                  "datasetName": "hospitals",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "expression": "`hospital`",
+                      "name": "hospital"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_kpi_visits",
+                "query": {
+                  "datasetName": "kpi_visits",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "hospital",
+                      "name": "hospital"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_visits_trend",
+                "query": {
+                  "datasetName": "visits_trend",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "hospital",
+                      "name": "hospital"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_kpi_stays",
+                "query": {
+                  "datasetName": "kpi_stays",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "hospital",
+                      "name": "hospital"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_stays_trend",
+                "query": {
+                  "datasetName": "stays_trend",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "hospital",
+                      "name": "hospital"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_by_payer",
+                "query": {
+                  "datasetName": "by_payer",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "hospital",
+                      "name": "hospital"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_by_hospital",
+                "query": {
+                  "datasetName": "by_hospital",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "hospital",
+                      "name": "hospital"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "fields": [
+                  {
+                    "displayName": "Hospital",
+                    "fieldName": "hospital",
+                    "queryName": "values"
+                  },
+                  {
+                    "parameterName": "hospital",
+                    "queryName": "param_kpi_visits"
+                  },
+                  {
+                    "parameterName": "hospital",
+                    "queryName": "param_visits_trend"
+                  },
+                  {
+                    "parameterName": "hospital",
+                    "queryName": "param_kpi_stays"
+                  },
+                  {
+                    "parameterName": "hospital",
+                    "queryName": "param_stays_trend"
+                  },
+                  {
+                    "parameterName": "hospital",
+                    "queryName": "param_by_payer"
+                  },
+                  {
+                    "parameterName": "hospital",
+                    "queryName": "param_by_hospital"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Hospital"
+              },
+              "version": 2,
+              "widgetType": "filter-single-select"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 1,
+            "width": 2,
+            "x": 4,
+            "y": 2
+          },
+          "widget": {
+            "name": "f_visit_type",
+            "queries": [
+              {
+                "name": "values",
+                "query": {
+                  "datasetName": "visit_types",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "expression": "`visit_type`",
+                      "name": "visit_type"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_kpi_visits",
+                "query": {
+                  "datasetName": "kpi_visits",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "visit_type",
+                      "name": "visit_type"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "param_visits_trend",
+                "query": {
+                  "datasetName": "visits_trend",
+                  "disaggregated": false,
+                  "parameters": [
+                    {
+                      "keyword": "visit_type",
+                      "name": "visit_type"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "fields": [
+                  {
+                    "displayName": "Visit type",
+                    "fieldName": "visit_type",
+                    "queryName": "values"
+                  },
+                  {
+                    "parameterName": "visit_type",
+                    "queryName": "param_kpi_visits"
+                  },
+                  {
+                    "parameterName": "visit_type",
+                    "queryName": "param_visits_trend"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Visit type"
+              },
+              "version": 2,
+              "widgetType": "filter-single-select"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 3,
+            "width": 1,
+            "x": 0,
+            "y": 3
+          },
+          "widget": {
+            "name": "c_visits",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_visits",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`visits`",
+                      "name": "visits"
+                    },
+                    {
+                      "expression": "`visits_prior`",
+                      "name": "visits_prior"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "target": {
+                  "fieldName": "visits_prior",
+                  "format": {
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                },
+                "value": {
+                  "fieldName": "visits",
+                  "format": {
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "frame": {
+                "description": "Below: prior 12 months.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Visits"
+              },
+              "version": 2,
+              "widgetType": "counter"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 3,
+            "width": 1,
+            "x": 1,
+            "y": 3
+          },
+          "widget": {
+            "name": "c_stays",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_stays",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`stays`",
+                      "name": "stays"
+                    },
+                    {
+                      "expression": "`stays_prior`",
+                      "name": "stays_prior"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "target": {
+                  "fieldName": "stays_prior",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 0,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                },
+                "value": {
+                  "fieldName": "stays",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 0,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "frame": {
+                "description": "Below: prior 12 months.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Hospital stays"
+              },
+              "version": 2,
+              "widgetType": "counter"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 3,
+            "width": 1,
+            "x": 2,
+            "y": 3
+          },
+          "widget": {
+            "name": "c_los",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_stays",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`avg_length_of_stay_days`",
+                      "name": "avg_length_of_stay_days"
+                    },
+                    {
+                      "expression": "`avg_length_of_stay_days_prior`",
+                      "name": "avg_length_of_stay_days_prior"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "target": {
+                  "fieldName": "avg_length_of_stay_days_prior",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                },
+                "value": {
+                  "fieldName": "avg_length_of_stay_days",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "frame": {
+                "description": "Below: prior 12 months.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Avg length of stay (days)"
+              },
+              "version": 2,
+              "widgetType": "counter"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 3,
+            "width": 1,
+            "x": 3,
+            "y": 3
+          },
+          "widget": {
+            "name": "c_cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_stays",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`cost_per_stay`",
+                      "name": "cost_per_stay"
+                    },
+                    {
+                      "expression": "`cost_per_stay_prior`",
+                      "name": "cost_per_stay_prior"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "target": {
+                  "fieldName": "cost_per_stay_prior",
+                  "format": {
+                    "abbreviation": "compact",
+                    "currencyCode": "USD",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "exact"
+                    },
+                    "type": "number-currency"
+                  }
+                },
+                "value": {
+                  "fieldName": "cost_per_stay",
+                  "format": {
+                    "abbreviation": "compact",
+                    "currencyCode": "USD",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "exact"
+                    },
+                    "type": "number-currency"
+                  }
+                }
+              },
+              "frame": {
+                "description": "Below: prior 12 months.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Cost per stay"
+              },
+              "version": 2,
+              "widgetType": "counter"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 3,
+            "width": 1,
+            "x": 4,
+            "y": 3
+          },
+          "widget": {
+            "name": "c_readmit",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_readmission",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`readmission_rate_pct_2020_2026`",
+                      "name": "readmission_rate_pct_2020_2026"
+                    },
+                    {
+                      "expression": "`readmission_rate_pct_2010_2019`",
+                      "name": "readmission_rate_pct_2010_2019"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "target": {
+                  "fieldName": "readmission_rate_pct_2010_2019",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 2,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                },
+                "value": {
+                  "fieldName": "readmission_rate_pct_2020_2026",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 2,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "frame": {
+                "description": "2020-26. Below: 2010-19.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "30-day readmission rate (%)"
+              },
+              "version": 2,
+              "widgetType": "counter"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 3,
+            "width": 1,
+            "x": 5,
+            "y": 3
+          },
+          "widget": {
+            "name": "c_share",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_visits",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`visits_share_of_network_pct`",
+                      "name": "visits_share_of_network_pct"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "value": {
+                  "fieldName": "visits_share_of_network_pct",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  }
+                }
+              },
+              "frame": {
+                "description": "100 with no filter.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Share of network visits (%)"
+              },
+              "version": 2,
+              "widgetType": "counter"
+            }
+          }
+        },
+        {
+          "widget": {
+            "name": "summary",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## What the last 12 months show (Aug 2025 - Jul 2026, whole network; written from this data load)\n",
+                "1. **More stays, cheaper and shorter.** Hospital stays rose 6.0% (497 against 469) while cost per stay fell 7.2% ($24.2K against $26.0K) and the average stay shortened from 5.4 to 5.2 days. Visits were flat (54.0K against 54.5K).\n",
+                "2. **Medicare is half the inpatient book and the costliest.** It holds 243 of 497 stays at $32,034 per stay. Medicaid and Dual Eligible stays run longest (6.4 and 6.2 days, against 5.2 for the network).\n",
+                "3. **Blood pressure control is the widest care gap.** 67.0% of 2,135 eligible patients are controlled, against 82.9% for diabetes HbA1c testing and 97.7% for statins.\n",
+                "\n",
+                "**What to do about it**\n",
+                "1. **Start a hypertension outreach programme.** It is the biggest gap on the largest group. Measure it by this closure rate in the next measure year.\n",
+                "2. **Review discharge planning for Medicaid and Dual Eligible stays.** Watch their length of stay in the payer table against the network's 5.2 days.\n",
+                "3. **Check case mix before crediting the cost fall.** Cost per stay swings by quarter (see the trend), and every hospital row but the largest rests on 11-16 stays. Read single hospitals over a longer window before acting on one.\n",
+                "\n",
+                "*Synthetic data (Synthea): the 30-day readmission rate (1.39% for 2020-2026) is far below real-world levels, and some \"hospitals\" are outpatient clinics that hold inpatient encounters.*"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "position": {
+            "height": 3,
+            "width": 6,
+            "x": 0,
+            "y": 11
+          },
+          "widget": {
+            "name": "t_network",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_stays",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`stays_change_pct`",
+                      "name": "stays_change_pct"
+                    },
+                    {
+                      "expression": "`length_of_stay_change_days`",
+                      "name": "length_of_stay_change_days"
+                    },
+                    {
+                      "expression": "`cost_change_pct`",
+                      "name": "cost_change_pct"
+                    },
+                    {
+                      "expression": "`length_of_stay_vs_network_days`",
+                      "name": "length_of_stay_vs_network_days"
+                    },
+                    {
+                      "expression": "`cost_vs_network_pct`",
+                      "name": "cost_vs_network_pct"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "columns": [
+                  {
+                    "displayName": "Stays vs prior 12 months (%)",
+                    "fieldName": "stays_change_pct",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Length of stay vs prior (days)",
+                    "fieldName": "length_of_stay_change_days",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Cost per stay vs prior (%)",
+                    "fieldName": "cost_change_pct",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Length of stay vs network (days)",
+                    "fieldName": "length_of_stay_vs_network_days",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Cost per stay vs network (%)",
+                    "fieldName": "cost_vs_network_pct",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "description": "Last 12 complete months of data. Network gaps read 0 until a payer or hospital is chosen.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Hospital stays: change and gap to the network"
+              },
+              "version": 2,
+              "widgetType": "table"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 4,
+            "width": 6,
+            "x": 0,
+            "y": 14
+          },
+          "widget": {
+            "name": "t_care_gaps",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "care_gaps",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`measure`",
+                      "name": "measure"
+                    },
+                    {
+                      "expression": "`measure_year`",
+                      "name": "measure_year"
+                    },
+                    {
+                      "expression": "`eligible`",
+                      "name": "eligible"
+                    },
+                    {
+                      "expression": "`closure_rate_pct`",
+                      "name": "closure_rate_pct"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "columns": [
+                  {
+                    "displayName": "Measure",
+                    "fieldName": "measure"
+                  },
+                  {
+                    "displayName": "Year",
+                    "fieldName": "measure_year"
+                  },
+                  {
+                    "displayName": "Eligible patients",
+                    "fieldName": "eligible",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 0,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Closure rate (%)",
+                    "fieldName": "closure_rate_pct",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "description": "HEDIS-style measures, simplified. Eligible = in the measure and not excused by age, death or hospice.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Care-gap closure (whole network)"
+              },
+              "version": 2,
+              "widgetType": "table"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 6,
+            "width": 6,
+            "x": 0,
+            "y": 18
+          },
+          "widget": {
+            "name": "ch_visits",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "visits_trend",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`visit_month`",
+                      "name": "visit_month"
+                    },
+                    {
+                      "expression": "`visits`",
+                      "name": "visits"
+                    },
+                    {
+                      "expression": "`visit_type`",
+                      "name": "visit_type"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "color": {
+                  "displayName": "Visit type",
+                  "fieldName": "visit_type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "x": {
+                  "displayName": "Month",
+                  "fieldName": "visit_month",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "displayName": "Visits",
+                  "fieldName": "visits",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 0,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Visits per month by visit type"
+              },
+              "version": 3,
+              "widgetType": "bar"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 5,
+            "width": 3,
+            "x": 0,
+            "y": 24
+          },
+          "widget": {
+            "name": "ch_los",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "stays_trend",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`admit_quarter`",
+                      "name": "admit_quarter"
+                    },
+                    {
+                      "expression": "`avg_length_of_stay_days`",
+                      "name": "avg_length_of_stay_days"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "x": {
+                  "displayName": "Quarter",
+                  "fieldName": "admit_quarter",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "displayName": "Avg length of stay (days)",
+                  "fieldName": "avg_length_of_stay_days",
+                  "format": {
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "places": 1,
+                      "type": "exact"
+                    },
+                    "type": "number-plain"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Average length of stay by quarter"
+              },
+              "version": 3,
+              "widgetType": "line"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 5,
+            "width": 3,
+            "x": 3,
+            "y": 24
+          },
+          "widget": {
+            "name": "ch_cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "stays_trend",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`admit_quarter`",
+                      "name": "admit_quarter"
+                    },
+                    {
+                      "expression": "`cost_per_stay`",
+                      "name": "cost_per_stay"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "x": {
+                  "displayName": "Quarter",
+                  "fieldName": "admit_quarter",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "displayName": "Cost per stay",
+                  "fieldName": "cost_per_stay",
+                  "format": {
+                    "abbreviation": "none",
+                    "currencyCode": "USD",
+                    "decimalPlaces": {
+                      "places": 0,
+                      "type": "exact"
+                    },
+                    "type": "number-currency"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cost per stay by quarter"
+              },
+              "version": 3,
+              "widgetType": "line"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 7,
+            "width": 6,
+            "x": 0,
+            "y": 29
+          },
+          "widget": {
+            "name": "t_payer",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "by_payer",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`payer`",
+                      "name": "payer"
+                    },
+                    {
+                      "expression": "`stays`",
+                      "name": "stays"
+                    },
+                    {
+                      "expression": "`avg_length_of_stay_days`",
+                      "name": "avg_length_of_stay_days"
+                    },
+                    {
+                      "expression": "`cost_per_stay`",
+                      "name": "cost_per_stay"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "columns": [
+                  {
+                    "displayName": "Payer",
+                    "fieldName": "payer"
+                  },
+                  {
+                    "displayName": "Stays",
+                    "fieldName": "stays",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 0,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Avg length of stay (days)",
+                    "fieldName": "avg_length_of_stay_days",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Cost per stay",
+                    "fieldName": "cost_per_stay",
+                    "format": {
+                      "abbreviation": "none",
+                      "currencyCode": "USD",
+                      "decimalPlaces": {
+                        "places": 0,
+                        "type": "exact"
+                      },
+                      "type": "number-currency"
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "description": "Last 12 complete months of data. Payer = the payer of the stay's first encounter.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "By payer"
+              },
+              "version": 2,
+              "widgetType": "table"
+            }
+          }
+        },
+        {
+          "position": {
+            "height": 8,
+            "width": 6,
+            "x": 0,
+            "y": 36
+          },
+          "widget": {
+            "name": "t_hospital",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "by_hospital",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "expression": "`hospital`",
+                      "name": "hospital"
+                    },
+                    {
+                      "expression": "`stays`",
+                      "name": "stays"
+                    },
+                    {
+                      "expression": "`avg_length_of_stay_days`",
+                      "name": "avg_length_of_stay_days"
+                    },
+                    {
+                      "expression": "`length_of_stay_vs_network_days`",
+                      "name": "length_of_stay_vs_network_days"
+                    },
+                    {
+                      "expression": "`cost_per_stay`",
+                      "name": "cost_per_stay"
+                    },
+                    {
+                      "expression": "`cost_vs_network_pct`",
+                      "name": "cost_vs_network_pct"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "encodings": {
+                "columns": [
+                  {
+                    "displayName": "Hospital",
+                    "fieldName": "hospital"
+                  },
+                  {
+                    "displayName": "Stays",
+                    "fieldName": "stays",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 0,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Avg length of stay (days)",
+                    "fieldName": "avg_length_of_stay_days",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Length of stay vs network (days)",
+                    "fieldName": "length_of_stay_vs_network_days",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  },
+                  {
+                    "displayName": "Cost per stay",
+                    "fieldName": "cost_per_stay",
+                    "format": {
+                      "abbreviation": "none",
+                      "currencyCode": "USD",
+                      "decimalPlaces": {
+                        "places": 0,
+                        "type": "exact"
+                      },
+                      "type": "number-currency"
+                    }
+                  },
+                  {
+                    "displayName": "Cost vs network (%)",
+                    "fieldName": "cost_vs_network_pct",
+                    "format": {
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "places": 1,
+                        "type": "exact"
+                      },
+                      "type": "number-plain"
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "description": "Last 12 complete months of data. Hospitals with 1-10 stays are left out. Network = all hospitals and payers.",
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Hospitals with 11 or more stays"
+              },
+              "version": 2,
+              "widgetType": "table"
+            }
+          }
+        }
+      ],
+      "name": "overview",
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ]
+}

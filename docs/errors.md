@@ -1640,3 +1640,84 @@ fix (no model, scoring or snapshot run).
 - `key_copies` is not a feature (`FEATURES` is an allowlist).
   `reconcile_gold.py` drops it before comparing; `sql/gold_fingerprint.sql`
   and `sql/phase7_proof.sql` leave it out.
+
+### E60 — the text-to-SQL contestant wrapped its answers in the dashboard's privacy function {#e60}
+```
+dev-3: metrics 13 of 20 (dev-2: 16)
+d12 metrics blocked: blocked function: healthcare_dev.metrics.shown(MEASURE(index_stays), ...)
+d05 metrics sql_error: [PARSE_SYNTAX_ERROR] ... GROUP BY ALL age_band
+```
+
+**Cause.** Two separate ones. The metrics contestant reads
+`sql/metric_views.sql` as its prompt, and phase 8 had put `metrics.shown()`
+and `metrics.kpi_window` in that file. The model saw a function and used it
+in three answers (d12, d15, d17), and the SQL safety gate blocks any
+function it does not know. Separately, with two more views in the prompt,
+it began writing `GROUP BY ALL age_band` (d05, twice in a row).
+`METRICS_NOTE` said "then GROUP BY ALL" but never that nothing may follow
+it.
+
+**Fix.** `shown()` and `kpi_window` moved to `sql/dashboard_support.sql`,
+which the contestant never reads. They are dashboard plumbing, not metrics.
+That took dev-4 to 15. `METRICS_NOTE` now says "end the query with GROUP BY
+ALL and nothing after it", and dev-5 scored 16, failing exactly dev-2's four
+questions. The note changed, never the questions. The recorded phase 5 test
+runs used the earlier note.
+
+**Also learned.** The judge is noisy. With an identical prompt, `raw`
+flipped 3 of its 20 verdicts between dev-3 and dev-4 (`ai_query` at
+temperature 0), so one point between two runs proves nothing. A failure
+counts when it repeats.
+
+### E61 — the payer table gave a hidden payer's count back by subtraction {#e61}
+```
+by_payer: 10 payers, 1 hidden (1-10 stays in the window)
+kpi_stays.stays - sum(visible payers' stays) is 1-10: True
+```
+
+**Cause.** `shown()` hides each small group on its own. But the Hospital
+stays tile shows the network total for the same window and filters, so the
+tile minus the nine visible payers gave the hidden payer's count back, on
+the default view meant for the README screenshot (D72). Caught by running
+every dataset on the default view before any widget was built.
+
+**First fix, not enough.** Hiding the smallest shown payer too left two
+payers hidden, with a leftover of 27 stays. But a reader who knows the rule
+knows the second hidden payer holds 11 or more stays, and no more than the
+smallest shown payer (18). That put the small payer at 9 or 10 stays, near
+enough to give it back. The final review caught this.
+
+**Fix.** Secondary suppression with a protection interval, in `by_payer`.
+Hiding the j smallest large payers leaves the small total at least
+`L - j × (smallest shown)`, where L is the hidden total. The query hides the
+fewest that push that bound to 1 or below, through a `privacy_n` column that
+`shown()` reads. On the default view that is five payers, and the small one
+could hold anything from 1 to 10. The privacy test fails if `by_payer`'s
+numbers stop reading `privacy_n`.
+
+The hospital table lists only hospitals with 11+ stays. Its leftover is the
+sum of more than a hundred hospitals and is not 1-10 on the default view.
+The visits chart has no hidden cell (rare types fold into `other`), and
+neither does the quarterly stays chart. Choosing one of the protective
+payers in the filter shows its own count. That is subtraction across two
+filtered views, accepted inside the private dashboard (D74).
+
+### E62 — `bundle deploy` wanted to delete and recreate the dashboard {#e62}
+```
+This action will result in the deletion or recreation of the following dashboards.
+This will result in changed IDs and permanent URLs of the dashboards that will be recreated:
+  recreate resources.dashboards.operations
+Error: the deployment requires destructive actions, but the current console does not support prompting.
+```
+
+**Cause.** The dashboard was created in the home folder
+(`/Users/<user>`). The generated resource set no `parent_path`, so the
+bundle wanted it in its own folder, and a folder change is a recreate:
+new id, new URL.
+
+**Fix.** `parent_path: /Users/${workspace.current_user.userName}` in
+`resources/operations.dashboard.yml`. The deploy then read "1 changed, 0
+deleted" and the id stayed the same. `--auto-approve` was never passed. A
+re-export with `bundle generate dashboard --resource operations --force`
+may rewrite that file: check `git diff resources/` after one and keep
+`parent_path`.

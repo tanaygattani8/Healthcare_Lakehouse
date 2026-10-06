@@ -1,6 +1,9 @@
 bundle:
   name: healthcare-lakehouse
 
+include:
+  - resources/*.yml
+
 variables:
   catalog:
     description: Target catalog for this environment

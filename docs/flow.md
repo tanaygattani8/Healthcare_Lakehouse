@@ -677,3 +677,28 @@ pure Python with their own tests; the notebooks only read, call and write.
 6. `sql/check_gold.sql` is a report; `tests/test_gold_contract.py` checks
    that every column the model reads is declared. `reconcile_gold.py` drops
    `key_copies` before comparing.
+
+### Cycle 19 — 2026-10-05 · Phase 8 · the operations dashboard
+
+1. **Probes**: `sql/probe_phase8.sql` (where the data ends; a star join in
+   a throwaway metric view), a parameter in a metric view's `WHERE`, the
+   counter's comparison value in the UI, and the CLI's `generate` and
+   `bind` commands.
+2. **Before**: the gold fingerprint and the metric-view checks into
+   `data/`, and `sql/phase8_before.sql` (a copy of `readmission_signals`).
+3. **Gold**: stay cost and length of stay move into `readmission_events`,
+   and `readmission_signals` reads them. Then `bundle deploy -t dev` and
+   `refresh_selection` on the two tables plus `gold_checks`.
+   `sql/phase8_proof.sql` and the fingerprint show nothing else moved.
+4. **Metrics**: `sql/metric_views.sql` (`operations`, `care_gaps`, `stays`
+   extended), then `sql/dashboard_support.sql` (`shown`, `kpi_window`),
+   then `sql/check_metrics.sql`. The dev text-to-SQL set is rerun
+   (dev-3 to dev-5, E60).
+5. **Dashboard**: every dataset is run on the default view (that is where
+   E61 surfaced). The page is built through the Lakeview API, then exported:
+   `databricks bundle generate dashboard --existing-id <id> --key operations -s dashboards -d resources`,
+   `bundle deployment bind`, `bundle deploy -t dev`.
+   `tests/test_dashboard_privacy.py` reads `dashboards/operations.lvdash.json`.
+6. **Changing it later**: edit the JSON and deploy, or edit in the UI and
+   re-export with `--resource operations --force`. Then check
+   `git diff resources/` for `parent_path` (E62) and run the privacy test.
