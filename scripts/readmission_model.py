@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
@@ -147,20 +149,26 @@ def recall_at_count(y, score, k: int) -> float:
     return float((top_k(score, k) & y).sum() / y.sum()) if y.any() else 0.0
 
 
-def bootstrap_difference(y, model, rule, groups, n: int = 1000,
-                         seed: int = 0) -> tuple[float, float, float]:
-    """95% interval of recall(model) - recall(rule), resampling patients, so
-    one patient's many stays move together. In each resample both flag as
-    many stays as the 0/1 rule flags there (decision P-f, as revised in D72:
-    rescaling one k moved the rule off its own count)."""
-    y, a, b = np.asarray(y, bool), np.asarray(model, float), np.asarray(rule, float)
+def patient_resamples(groups, n: int, seed: int) -> Iterator[np.ndarray]:
+    """n resamples of whole patients, as row indices, so one patient's many
+    stays move together."""
     _, patient = np.unique(np.asarray(groups), return_inverse=True)
     order = np.argsort(patient, kind="stable")
     rows_of = np.split(order, np.cumsum(np.bincount(patient))[:-1])
     rng = np.random.default_rng(seed)
-    diffs = []
     for _ in range(n):
-        idx = np.concatenate([rows_of[i] for i in rng.integers(0, len(rows_of), len(rows_of))])
+        yield np.concatenate([rows_of[i] for i in rng.integers(0, len(rows_of), len(rows_of))])
+
+
+def bootstrap_difference(y, model, rule, groups, n: int = 1000,
+                         seed: int = 0) -> tuple[float, float, float]:
+    """95% interval of recall(model) - recall(rule), resampling patients. In
+    each resample both flag as many stays as the 0/1 rule flags there
+    (decision P-f, as revised in D72: rescaling one k moved the rule off its
+    own count)."""
+    y, a, b = np.asarray(y, bool), np.asarray(model, float), np.asarray(rule, float)
+    diffs = []
+    for idx in patient_resamples(groups, n, seed):
         k_r = int(np.count_nonzero(b[idx]))
         diffs.append(recall_at_count(y[idx], a[idx], k_r) - recall_at_count(y[idx], b[idx], k_r))
     low, mid, high = np.percentile(diffs, [2.5, 50, 97.5])

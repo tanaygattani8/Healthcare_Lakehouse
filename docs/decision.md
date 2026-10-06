@@ -2645,3 +2645,174 @@ The phase 5 test runs used the earlier note and views.
   hospital name as unnamed. A missing organization gives `''` under
   `concat_ws`, not NULL. Stay costs are checked against `fact_encounter`
   (each hospital encounter's cost lands in exactly one stay).
+
+### D75 — phase 9: retraining on drift, replayed through Airflow
+
+**Why.** D71 left a drift report saying the 2020-2026 patients are not the
+ones the model learned from, and a champion whose cutoff was set to flag
+about 22% of stays, as the rule does, but flags 31-36% of production stays.
+D73 left a rule: no training on a table no gate has checked. Phase 9 builds
+the loop that acts on drift, and Airflow's part in it.
+
+**The data never changes, so a date cursor stands in for time.** Both
+Synthea batches cover one fixed calendar. A DAG that runs drift and then
+retrains would fire once and never meaningfully again. Instead, each run is
+told "today is `as_of`" and sees only what was known then. Six yearly
+cursors, 1 January 2021 to 1 January 2026, replay the policy in a sandbox.
+One live run then applies it for real.
+
+**The rule at one cursor** (`scripts/retrain.py`, tested on made-up rows):
+- **Windows** (by admit day): the check window is the 12 months before
+  `as_of`, and the cutoff window the 12 before that. A label counts only if
+  the discharge was 30 or more days before `as_of`.
+- **Budget:** the rule's flag rate on phase 6's training stays, 21.8%.
+  Computed, never typed, and the same for every cursor.
+- **Trigger:** the champion's flag rate on the check window, with its 95%
+  Wilson interval. It triggers when the interval excludes the budget.
+  Feature drift is computed every time, but only explains a trigger.
+- **Two challengers:**
+  - a **new cutoff**, the same model with its cutoff re-set to flag 21.8%
+    of the cutoff window;
+  - a **retrain**, the champion's own kind and settings refitted on every
+    labelled stay before the check window.
+
+  Scores on stays a model trained on are out of fold (D72).
+- **The gate**, on the check window, which neither challenger saw:
+  - **workload:** the challenger's flag-rate interval contains the budget;
+  - **a ranking guard:** the challenger is not clearly worse at ranking
+    than the champion (average precision, patients resampled 1,000 times;
+    it fails only if the whole interval is below zero).
+- **Winner:** the new cutoff if it passes, then the retrain, else nothing.
+  The smaller change wins.
+- **Why workload and not accuracy:** about 5 readmissions a year. No
+  one-year window can show that one model ranks better than another (phase
+  6 fixed 30 as the bar), so the guard catches gross failure only. The
+  claim phase 9 can make is "retraining keeps the review workload at the
+  budget", not "retraining improves accuracy".
+
+**The pieces.**
+- **`notebooks/retrain_readmission.py`** runs one cursor (`as_of`, `mode`).
+  It appends one row to `ml.retrain_history`, logs an MLflow run, and on a
+  win registers a version with its cutoff and training dates as tags:
+  - a new cutoff is `copy_model_version`;
+  - a retrain is a newly logged model.
+
+  It moves `replay_<year>` in replay mode, or `champion` in live mode.
+  - **An order guard runs before any compute.** Replays go one year at a
+    time from 2021, a live run needs all six, and nothing repeats.
+  - **The history row is written last,** so a crash leaves a spare version,
+    never a decision without a record.
+- **`orchestration/dags/retrain.py`** (`schedule=None`,
+  `max_active_runs=1`, `retries=0`, typed `as_of` and `mode` params) runs
+  four tasks:
+  - `gold_is_gated` fails unless no pipeline update is running and the
+    latest real one COMPLETED;
+  - `retrain` submits the notebook;
+  - `promoted_live` reads its exit value and logs it;
+  - `rescore` runs `score_readmission` after a live promotion only.
+
+  The notebook does all the compute in one serverless job; splitting it
+  into tasks would cost a cold start each.
+- **`score_readmission` changed by one line:** it scores from the
+  champion's `train_admit_before` tag when it is later than 2020
+  (`rt.scored_from`), so a retrained champion never scores its own training
+  stays. On v2 it moved nothing (the fingerprint matched).
+- **`rm.patient_resamples`** was pulled out of `bootstrap_difference` for
+  the ranking guard. A test pins every draw to the old loop, so D71's
+  intervals stand.
+
+**Probes** (`notebooks/probe_retrain.py`, the provider's hook in the
+container, and a throwaway DAG):
+- **P1:** `copy_model_version` works on Free Edition. The copy keeps the
+  source's run id and tags, and scores identically.
+- **P2/P3:** the hook's endpoints take no `api/` prefix (`2.0/pipelines/...`,
+  `2.1/jobs/...`). Updates come newest first, with `validate_only` on each.
+- **P4:** a typed `Param(format="date")` is enforced at trigger time on a
+  `schedule=None` DAG. A bad date or no date creates no run.
+- **P5:** v2's flag rate by year matches D71 (2020-2025: 31.4-35.7%).
+- **P6:** the last admit day in `readmission_signals` is 2026-07-14, so the
+  live run's `as_of` is 2026-07-15.
+- **P7:** v2's kind and settings come back from its run's params.
+
+**The six years** (budget 21.8%):
+
+| Cursor (checks) | Champion | Flag rate (95%) | Triggered | New cutoff | Retrain | Outcome |
+|---|---|---|---|---|---|---|
+| 2021 (2020) | v2 | 31.6% (27.4-36.1) | yes | 23.0% pass | 23.7% pass | **new cutoff → v4** |
+| 2022 (2021) | v4 | 21.2% (17.6-25.2) | no | | | no trigger |
+| 2023 (2022) | v4 | 23.3% (19.1-28.2) | no | | | no trigger |
+| 2024 (2023) | v4 | 25.2% (20.9-30.1) | no | | | no trigger |
+| 2025 (2024) | v4 | 26.1% (21.8-30.9) | no | | | no trigger |
+| 2026 (2025) | v4 | 27.7% (23.3-32.6) | yes | 26.6% fail | 29.4% fail | **none passed** |
+
+The ranking guard read "not worse" both times it ran. In every row, the
+features with status "shifted" include conditions at admission,
+hypertension, heart disease or stroke and, from 2023, age.
+
+**What the replay found.**
+- **The drift began before 2020.** The spec predicted both challengers
+  would fail at 2021, because their cutoff comes from 2019, which "did not
+  know 2020 was coming". Instead the 2019 cutoff (0.0118, against v2's
+  0.0078 set on all of 2010-2019) flagged 23.0% of 2020. Scores were
+  already higher in 2019 than across the training decade, so 2020
+  continued a trend rather than breaking it. This answers the question D71
+  left open ("per-year training rates were not computed").
+- **After one promotion, a slow creep.** v4's rate rose about 1.5 points a
+  year, from 21.2% to 27.7%.
+- **The trigger cannot see a slow trend.** At 330-450 stays a year the
+  interval is about ±4.5 points, so the creep stayed "on budget" for four
+  years. 2025's lower bound sat exactly on 21.8%.
+- **When it fired again, neither fix worked.** A cutoff learned from last
+  year is one year behind, and from 2024 to 2025 the scores moved more than
+  the interval's width. The gate judged correctly; the weakness is the
+  policy.
+- **Retraining never beat moving the cutoff** (23.7% against 23.0%, and
+  29.4% against 26.6%). On this data a new model added nothing a new
+  threshold did not.
+
+**The live run** (`as_of` 2026-07-15, starting from live v2):
+- **Before it, the sandbox check passed.** Both `ml` fingerprints were
+  identical to the before-record, and `champion` was v2 in both models.
+- **The run:** v2 flagged 33.5% (28.9-38.5%) of mid-2025 to mid-2026. The
+  new cutoff, set on mid-2024 to mid-2025, flagged 20.3% and passed; the
+  retrain flagged 23.0% and also passed.
+- **So `champion` moved to v5:**
+  - v5 is v2's model with cutoff 0.0201;
+  - `rescore` added v5's 2,451 rows to `ml.readmission_scores` (11,769 in
+    all, beside v1's and v2's);
+  - `ml.drift_report` did not change, and `no_bypass` stays at v2;
+  - the snapshot was not rerun, because it reads only `model_results` and
+    `drift_report`.
+- **Read with care.** The 2026 replay failed and the live run passed, and
+  their windows are only six months apart. A cutoff is the 78th percentile
+  of about 350 scores, so it is itself noisy, and moving the window by half
+  a year moved the verdict across the line.
+
+**The loop's limits, said plainly.**
+- Every decision rests on about 350 stays.
+- The trigger sees moves of about 5 points, not trends.
+- The cutoff lags by the length of its window.
+
+Each decision is honest about what it measured; none is precise.
+
+**Decisions made while planning or building.**
+- **P-a:** the probes found the endpoints without the `api/` prefix, so the
+  DAG uses `2.0` and `2.1`.
+- **The snapshot is not rerun** after a live promotion: it reads nothing
+  that changes (against spec §8 step 9).
+- **The live run decides from live v2.** The replay's promotions do not
+  carry into it (spec §2.7).
+- **The 2021 cursor ran by hand first** (`run_notebook.sh` now takes JSON
+  parameters), to time it before the backfill. Each cursor takes about two
+  minutes.
+- **Errors:** E63 (E32's timeout, on a stack long up) and E64 (a pasted
+  heredoc garbled).
+
+**What phase 10 receives.**
+- A champion (v5) chosen by a rule that was replayed before it was trusted,
+  and `ml.retrain_history`: seven decisions with their rates and reasons.
+- Two named weaknesses, neither built:
+  - a cutoff set on recent months rather than a whole year (the lag);
+  - a trend test across cursors (the trigger's blindness).
+- A DAG pattern that any further model can follow: a gate first, one
+  compute job, a branch on its outcome, then downstream.

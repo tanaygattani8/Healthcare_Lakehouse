@@ -4,8 +4,12 @@ FILES=/Workspace/Users/tanaygattani8@gmail.com/.bundle/healthcare-lakehouse/dev/
 PY=.venv/Scripts/python.exe
 field() { $PY -c "import json, sys; d = json.load(sys.stdin); print($1)"; }
 
+# $2, optional: the notebook's parameters as JSON, e.g. '{"as_of": "2021-01-01"}'.
+params=${2:-}
+[ -n "$params" ] || params='{}'
 body="{\"run_name\": \"phase6-$1\", \"tasks\": [{\"task_key\": \"main\",
-  \"notebook_task\": {\"notebook_path\": \"$FILES/notebooks/$1\"}}]}"
+  \"notebook_task\": {\"notebook_path\": \"$FILES/notebooks/$1\",
+  \"base_parameters\": $params}}]}"
 run_id=$(databricks jobs submit --no-wait --output json --json "$body" | field "d['run_id']")
 echo "run $run_id: $FILES/notebooks/$1"
 while :; do

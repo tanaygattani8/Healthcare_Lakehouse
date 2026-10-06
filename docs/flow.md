@@ -702,3 +702,68 @@ pure Python with their own tests; the notebooks only read, call and write.
 6. **Changing it later**: edit the JSON and deploy, or edit in the UI and
    re-export with `--resource operations --force`. Then check
    `git diff resources/` for `parent_path` (E62) and run the privacy test.
+
+## Entry point 7 — the retrain DAG (laptop Airflow, drives Databricks)
+
+**Invoked as:** from `orchestration/`,
+`docker compose --env-file ../.env exec airflow-scheduler airflow dags trigger retrain -c '{"as_of": "2021-01-01", "mode": "replay"}'`.
+`as_of` is required and must be a date; `mode` is `replay` (default) or
+`live`. Never on a schedule (`schedule=None`). One run at a time
+(`max_active_runs=1`).
+**Reads:** the pipeline's update list, `gold.readmission_signals`,
+`ml.retrain_history`, the `readmission_all` registry.
+**Writes:** one `ml.retrain_history` row, one MLflow run, and on a win a
+registry version plus alias (`replay_<year>`, or `champion` when live). A
+live win also rewrites that version's rows in `ml.readmission_scores`.
+
+```
+trigger retrain  (as_of, mode)       params validated at trigger: a bad date makes no run
+├── gold_is_gated          @task, GET 2.0/pipelines/<id>/updates through DatabricksHook
+│     ├── any update not COMPLETED/FAILED/CANCELED → red ("update <id> is RUNNING")
+│     └── newest non-validate-only update not COMPLETED → red          (D73)
+├── retrain                DatabricksSubmitRunOperator → notebooks/retrain_readmission
+│     ├── 1. order guard   rt.order_problem: replay one year at a time from 2021;
+│     │                    live needs six replays; no (as_of, mode) twice
+│     ├── 2. champion      live: @champion · replay: newest replay alias, else @champion
+│     ├── 3. trigger       rt.flag_rate on the 12 months before as_of vs rt.budget (21.8%)
+│     │                    rt.shifted_features stored, triggers nothing
+│     ├── 4. challengers   new cutoff: same model, rm.alert_threshold on the 12 months before
+│     │                    retrain: rm.build_pipeline(champion's kind) on every labelled stay
+│     │                    before the check window; rt.window_scores = out of fold where seen
+│     ├── 5. gate          rt.on_budget (Wilson) + rt.ranking_guard (AP, patients resampled)
+│     ├── 6. promote       rt.winner → copy_model_version | log_model, tags, alias
+│     └── 7. history row   appended LAST; exit JSON {outcome, version, alias}
+├── promoted_live          @task.short_circuit: 2.1/jobs/runs/get-output, logs the outcome
+│     └── continues only if mode = live and the outcome is a promotion
+└── rescore                DatabricksSubmitRunOperator → notebooks/score_readmission
+                           scores from rt.scored_from(champion.tags): 2020, or after its training
+```
+
+If a task dies at `Pre Execute` with `httpx.ReadTimeout` (E32, E63), trigger
+the same `as_of` again: nothing reached Databricks and no row was written.
+By hand, without Airflow:
+`bash scripts/run_notebook.sh retrain_readmission '{"as_of": "2021-01-01", "mode": "replay"}'`,
+after checking `databricks pipelines list-updates <id>` yourself.
+
+### Cycle 20 — 2026-10-06 · Phase 9 · retraining on drift
+
+1. **Probes**: `notebooks/probe_retrain.py` (P1 `copy_model_version`, P5
+   v2's flag rate by year, P6 the last admit day, P7 v2's settings); the
+   provider's hook in the scheduler container (P2 pipeline updates, P3 a
+   notebook's exit value: no `api/` prefix); a throwaway `probe_params` DAG
+   (P4 typed params). E63 and E64 were met here.
+2. **Rules**: `scripts/retrain.py` and `tests/test_retrain.py`;
+   `rm.patient_resamples` pulled out of `bootstrap_difference`, pinned by a
+   test.
+3. **Before-record**: `sql/ml_fingerprint.sql` and the registry aliases.
+4. **Scoring**: the `scored_from` line in `score_readmission`, then a
+   rescore on v2; the fingerprint matched exactly.
+5. **One cursor by hand**: `notebooks/retrain_readmission.py` and
+   `sql/retrain_history.sql`; `run_notebook.sh` takes JSON parameters. 2021
+   ran in 1 min 51 s and promoted v4.
+6. **The DAG**: `orchestration/dags/retrain.py`; import check; the gate seen
+   red during a `--validate-only` update, with no Databricks run started.
+7. **Replay** 2022-2026 through Airflow, one at a time.
+8. **Sandbox check, then live**: fingerprints and aliases unchanged; the
+   live run (`as_of` 2026-07-15) promoted v5 to `champion` and rescored.
+   The results are in D75.

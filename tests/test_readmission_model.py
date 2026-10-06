@@ -193,3 +193,17 @@ def test_evaluate_rows():
     assert {r["model_verdict"] for r in rows
             if r["scorer"] == "model" and r["patients"] != "all"} == {"too few to judge"}
     assert set().union(*rows) <= set(rm.RESULT_COLUMNS)
+
+def test_patient_resamples_draws_what_the_bootstrap_always_drew():
+    # The loop bootstrap_difference had before phase 9, written out: the
+    # extraction must not change a single draw (D71's intervals rest on them).
+    groups = np.array(["a", "b", "a", "c", "b", "d", "e", "a"])
+    _, patient = np.unique(groups, return_inverse=True)
+    order = np.argsort(patient, kind="stable")
+    rows_of = np.split(order, np.cumsum(np.bincount(patient))[:-1])
+    rng = np.random.default_rng(3)
+    old = [np.concatenate([rows_of[i] for i in rng.integers(0, len(rows_of), len(rows_of))])
+           for _ in range(20)]
+    new = list(rm.patient_resamples(groups, 20, seed=3))
+    assert len(new) == 20
+    assert all(np.array_equal(a, b) for a, b in zip(old, new, strict=True))

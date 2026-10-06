@@ -7,7 +7,10 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 8 complete: an AI/BI operations dashboard for a hospital
+**Status:** Phase 9 complete: an Airflow DAG that retrains on drift,
+replayed year by year over 2021-2026 before it was allowed to move the live
+model. It judges the review workload, not accuracy, and it found its own
+limits (D75). Phase 8 added an AI/BI operations dashboard for a hospital
 quality and operations director, kept as code, with every small number
 hidden by construction (D74). Phase 7 made gold's invariants stop the
 pipeline when they break; on their first runs they caught two silent bugs.
@@ -21,6 +24,56 @@ pointed the model's way, on 17 readmissions, too few to judge. The phase's
 real product is the platform around the model: experiments, a registry,
 batch scoring and a drift monitor, which says the 2020-2026 patients are
 older and sicker than the ones the model learned from.
+
+## What phase 9 produced
+
+**A retraining loop that acts on drift, replayed before it was trusted.**
+The data never changes: both Synthea batches cover one fixed calendar. So
+each run of a new Airflow DAG, `retrain`, is told "today is `as_of`" and
+sees only what was known then. Six yearly runs replayed 2021-2026 in a
+sandbox, then one live run applied the same rule for real (D75).
+
+**What it judges is workload, not accuracy.** With about 5 readmissions a
+year, no one-year window can show that one model ranks better than
+another. What drift did measurably is make nurses review more charts: the
+cutoff was set to flag 21.8% of stays, and on 2020 patients it flagged
+31.6%.
+- **The trigger:** when the champion's flag rate on the last 12 months
+  leaves the 21.8% budget (95% interval).
+- **Two challengers:** a new cutoff on the same model, and a retrained
+  model.
+- **The winner:** the simpler one that brings the rate back to budget and
+  is not clearly worse at ranking.
+
+| Cursor (checks) | Champion's flag rate (95%) | New cutoff | Retrain | Outcome |
+|---|---|---|---|---|
+| 2021 (2020) | 31.6% (27.4-36.1) | 23.0% pass | 23.7% pass | **new cutoff promoted** |
+| 2022 (2021) | 21.2% (17.6-25.2) | | | no trigger |
+| 2023 (2022) | 23.3% (19.1-28.2) | | | no trigger |
+| 2024 (2023) | 25.2% (20.9-30.1) | | | no trigger |
+| 2025 (2024) | 26.1% (21.8-30.9) | | | no trigger |
+| 2026 (2025) | 27.7% (23.3-32.6) | 26.6% fail | 29.4% fail | **none passed** |
+| live, 2026-07-15 | 33.5% (28.9-38.5) | 20.3% pass | 23.0% pass | **new cutoff → live `champion`** |
+
+**What it found:**
+- **The drift began before 2020.** A cutoff set on 2019 alone already
+  fitted 2020, which answers what phase 6 left open.
+- **Moving the cutoff was always enough.** Retraining never did better.
+- **The loop's limits.** After one fix, the rate crept up about 1.5 points
+  a year, which a trigger with a ±4.5-point interval cannot see. When it
+  fired again, a cutoff learned from the year before was a year behind.
+  Every decision rests on about 350 stays, and moving the window by six
+  months moved one verdict across the line.
+
+**The pieces:**
+- **The DAG** checks that the pipeline's last update passed its gates
+  before anything trains. It was seen refusing, with no compute spent.
+- **One notebook** does the work, with an order guard so no year is
+  skipped or decided twice.
+- **`ml.retrain_history`** keeps every decision, rates and verdicts only.
+- **Scoring** never scores a model's own training stays.
+
+The sandbox was checked unchanged before the live run.
 
 ## What phase 8 produced
 
@@ -382,7 +435,10 @@ docker compose --env-file ../.env up -d
 Open http://localhost:8080 (airflow / airflow) once `docker compose ps` shows
 every service `(healthy)`, and trigger the `medallion` DAG by hand. It is never
 scheduled: on Free Edition a timer-driven run can exhaust the daily quota
-unattended. `--env-file ../.env` is how Airflow gets the Databricks credentials —
+unattended. The `retrain` DAG is triggered the same way, one cursor per run:
+`docker compose --env-file ../.env exec airflow-scheduler airflow dags trigger retrain -c '{"as_of": "2021-01-01", "mode": "replay"}'`.
+It refuses to start unless the pipeline's last update passed its gates,
+and refuses a year out of order. `--env-file ../.env` is how Airflow gets the Databricks credentials —
 there is no second credential file.
 
 ## Architecture notes
@@ -418,6 +474,7 @@ there is none.
 | No GPU, and a daily compute cap | The name model runs on GPU inference | It ran 6.5 hours on a laptop CPU after the cap stopped the Databricks job two hours in. The test set was cut to 25 patients so every program could afford it |
 | A daily compute cap | FHIR flattened for every patient | The FHIR export is 12.8 GB; track A ran on the 25 test patients (316 MB). SQL-vs-PySpark timings are one run at 1,148 patients and are not a ranking |
 | Billing visible only hours later | Cost per query from live metering | Text-to-SQL cost is reported as seconds per answer (Genie 16 s, Llama 2 s) |
+| A fixed synthetic calendar, and a daily compute cap | Drift checks on a schedule as new data lands, retraining when they fire | No new data ever arrives, so a date cursor replays history one year per run (D75). Every run is triggered by hand |
 | Unity Catalog model registry | MLflow writes model files straight to catalog storage | Free Edition denies that write; MLflow 3.16.1 with `MLFLOW_USE_DATABRICKS_SDK_MODEL_ARTIFACTS_REPO_FOR_UC` sends it through the Files API instead (E52) |
 | Synthetic notes | Real notes name relatives and clinicians, and write dates many ways | Synthea notes hold first names and ISO dates only, so these scores are a ceiling for real notes, not a forecast |
 

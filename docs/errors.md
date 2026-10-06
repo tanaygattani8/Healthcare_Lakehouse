@@ -79,6 +79,14 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E54](#e54) | `[MISSING_AGGREGATION] The non-aggregating expression "admit_day"` validating the pipeline | 6 |
 | [E55](#e55) | `databricks-sql-connector 3.4.0 requires numpy<2.0.0` after installing scikit-learn | 6 |
 | [E56](#e56) | `The saved sklearn model references untrusted types` logging a model | 6 |
+| [E57](#e57) | `EXPECTATION_VIOLATION` on the first gated update: a gate fails on a NULL | 7 |
+| [E58](#e58) | `readmission_events.encounters_in_stay` multiplied inside the pipeline | 7 |
+| [E59](#e59) | `readmission_signals` rebuilt with duplicate stays; `gold_checks` fails after the replace | 7 |
+| [E60](#e60) | `blocked function: healthcare_dev.metrics.shown(...)` in the text-to-SQL eval | 8 |
+| [E61](#e61) | A hidden payer's count comes back as the stays tile minus the visible payers | 8 |
+| [E62](#e62) | `bundle deploy`: "deletion or recreation of the following dashboards" | 8 |
+| [E63](#e63) | `httpx.ReadTimeout` again, on a stack up 25 minutes, with services reading `unhealthy` | 9 |
+| [E64](#e64) | A pasted heredoc runs as garbled Python (`strEOF breakidate_only"))…`) | 9 |
 
 ---
 
@@ -1721,3 +1729,66 @@ deleted" and the id stayed the same. `--auto-approve` was never passed. A
 re-export with `bundle generate dashboard --resource operations --force`
 may rewrite that file: check `git diff resources/` after one and keep
 `parent_path`.
+
+---
+
+## Phase 9 — retraining on drift
+
+### E63 — E32 again: the task's first API call times out on a stack that has been up for 25 minutes {#e63}
+```
+[error] Workload execution failed.  [airflow.executors.local_executor.LocalExecutor]
+httpcore.ReadTimeout: timed out
+httpx.ReadTimeout: timed out
+airflow-dag-processor   Up 30 minutes (unhealthy)
+airflow-scheduler       Up 30 minutes (unhealthy)
+Health check exceeded timeout (10s): Found one alive job.
+```
+
+**Never reached Databricks.** The probe DAG's task died before its code
+ran, at its first call to the API server's `/execution/` endpoint, exactly
+as in E32. Its log stops at `Pre Execute`.
+
+**Cause.**
+- **E32's diagnosis was "triggered while the stack was still starting".**
+  Here the stack had been up for 25 minutes, so that was not it.
+- **The scheduler and DAG processor read `unhealthy`, but they were
+  alive.** Their health check is `airflow jobs check`, a CLI call that
+  starts a whole Python interpreter. Its own output says "Found one alive
+  job", but on this laptop it takes longer than the compose file's 10 s
+  limit.
+- **So the box was slow, not broken.** I was running several `airflow` CLI
+  commands in the container at the moment the task made its call, and the
+  API server answered too late.
+
+**Fix.**
+- The identical trigger, five minutes later and with nothing else running,
+  succeeded.
+- After ten quiet hours, all four services read `healthy`, and the next
+  eight DAG runs (the red gate, five replay cursors, one live run) never
+  hit it.
+
+**What E32's fix becomes.** "Wait until every service reads healthy"
+cannot always be met on this machine. The rule is now:
+- don't run other `airflow` CLI commands while a run is starting;
+- if a run dies at `Pre Execute`, trigger the same thing once more.
+
+In the `retrain` DAG that is safe. The first task, `gold_is_gated`, spends
+no Databricks compute, and a run that dies before the notebook writes no
+history row, so the order guard expects the same year again.
+
+### E64 — a long heredoc pasted into Git Bash runs as garbled Python {#e64}
+```
+        print("prefix", repr(prefix), "failed:", type(error).__name__, strEOF breakidate_only"))reation_time"), u.get("state"), "validate_only =", u
+```
+
+**Cause.** A 15-line `python - <<'EOF'` block pasted into the Git Bash
+window was merged and overwritten while it was being pasted: the tail of
+one line landed in the middle of another. The command that ran was not
+the command that was written. (It would have failed anyway: the Airflow
+stack was not running.)
+
+**Fix.** Save the script as a file and feed it to the container:
+`docker compose --env-file ../.env exec -T airflow-scheduler python - < probe.py`.
+That is one short line to paste. Anything longer than a few lines goes
+through a file.
+

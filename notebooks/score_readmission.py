@@ -1,7 +1,9 @@
 # Databricks notebook source
-# Phase 6 batch scoring (spec §5): each champion scores the 2020-2026 index
-# stays into ml.readmission_scores. Rerunning replaces that model version's
-# rows. No labels here: evaluation joins back to gold.readmission_signals.
+# Phase 6 batch scoring (spec §5), changed in phase 9 (spec §3.3): each
+# champion scores the index stays from 2020, or from the end of its own
+# training if that is later, into ml.readmission_scores. Rerunning replaces
+# that model version's rows. No labels here: evaluation joins back to
+# gold.readmission_signals.
 
 # COMMAND ----------
 
@@ -28,6 +30,7 @@ import mlflow.sklearn
 import pandas as pd
 
 from scripts import readmission_model as rm
+from scripts import retrain as rt
 
 C = "healthcare_dev"
 TABLE = f"{C}.ml.readmission_scores"
@@ -47,7 +50,9 @@ for population in rm.POPULATIONS:
     # Raises "alias champion not found" if training never registered one.
     champion = client.get_model_version_by_alias(name, "champion")
     model = mlflow.sklearn.load_model(f"models:/{name}@champion")
-    _, _, prod = rm.split(rm.population(signals, population))
+    # A retrained champion trained on stays after 2020; it scores only later ones.
+    _, _, prod = rm.split(rm.population(signals, population),
+                          prod_from=rt.scored_from(champion.tags))
     expected = int(champion.tags["prod_stays"])
     assert len(prod) == expected, f"{name}: {len(prod)} production stays, training saw {expected}"
 
