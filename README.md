@@ -110,7 +110,11 @@ answers how busy the network was, how long patients stayed, what a stay
 cost, how often patients came back and whether care gaps are closing,
 overall and by payer and hospital.
 
-![Operations overview](docs/img/dashboard.png)
+![Chapter 7 of the app: the dashboard's default view](docs/img/operations-chapter.png)
+
+*The dashboard's default view as the public app shows it (chapter 7, D77).
+The dashboard itself sits behind the Databricks login; this page runs its
+SQL, and hospital and insurer names are made up.*
 
 - **KPI tiles against a benchmark:** visits, hospital stays, average length
   of stay and cost per stay for the last 12 complete months, each against

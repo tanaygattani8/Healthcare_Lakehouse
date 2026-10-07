@@ -2946,7 +2946,9 @@ phone width):
 - the footer's GitHub link opens a new tab (GitHub refuses to load inside
   streamlit.app's frame), and the map's ignored `url_path="map"` is gone.
 
-**Not done.** The README's dashboard screenshot still shows the real
-hospital and insurer names, so a reader can match "Hospital A" to a real
-name by its numbers. It needs a retake with the names cropped, or replacing
-with the app's chapter.
+**The README screenshot.** The old one showed the real hospital and insurer
+names, so a reader could match "Hospital A" to a real name by its numbers.
+It is replaced by a capture of chapter 7 (`docs/img/operations-chapter.png`).
+The old image stays in git history; rewriting history for it was not worth
+breaking every clone. A "hidden" cell is now right-aligned like the numbers
+it stands in for, which the capture showed it was not.

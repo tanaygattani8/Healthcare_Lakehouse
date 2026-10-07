@@ -142,7 +142,8 @@ def table(df: pd.DataFrame, formats: dict[str, str] | None = None, missing: str 
 
     def cell(column, value) -> str:
         if pd.isna(value):
-            return f'<td class="x">{esc(missing)}</td>'
+            # Aligned like the numbers it stands in for.
+            return f'<td class="x{" r" if column in numeric else ""}">{esc(missing)}</td>'
         if column not in numeric:
             return f"<td>{esc(value)}</td>"
         spec = formats.get(column, ",.0f" if float(value).is_integer() else ",")
