@@ -110,6 +110,15 @@ MODEL_DRIFT = ("SELECT drift_check, period, subject, value, low, high, status "
                "FROM {catalog}.ml.drift_report "
                "WHERE run_at = (SELECT max(run_at) FROM {catalog}.ml.drift_report)")
 MODEL_TEXT = {"population", "patients", "scorer", "model_kind", "model_version", "model_verdict"}
+# Phase 9: the retraining loop's decisions. ml.retrain_history holds rates and
+# verdicts only (D75); the stay count per window is in the hundreds.
+RETRAIN_HISTORY = (
+    "SELECT as_of, mode, champion_version, check_stays, target, champion_rate, "
+    "champion_low, champion_high, triggered, cutoff_rate, cutoff_workload, retrain_rate, "
+    "retrain_workload, retrain_ranking, outcome, new_version, shifted_features "
+    "FROM {catalog}.ml.retrain_history ORDER BY written_at")
+RETRAIN_TEXT = {"mode", "champion_version", "cutoff_workload", "retrain_workload",
+                "retrain_ranking", "outcome", "new_version", "shifted_features", "triggered"}
 # The five commonest admit reasons (Task 2 Step 5), pasted, so the guard
 # stays a fixed list. A new name stops the publish until it is checked.
 ADMIT_REASONS = {
@@ -142,6 +151,14 @@ ALLOWED_TEXT = {
     "period": {"training", "2020-2026"} | {str(year) for year in range(2020, 2027)},
     "subject": set(FEATURES) | set(POPULATIONS),
     "status": {"stable", "watch", "shifted", "reference"},
+    "mode": {"replay", "live"},
+    "outcome": {"no trigger", "none passed", "new cutoff", "retrain"},
+    "cutoff_workload": {"pass", "fail"},
+    "retrain_workload": {"pass", "fail"},
+    "retrain_ranking": {"not worse", "clearly worse", "not judged"},
+    # Registry versions: digits only, so nothing else can ride in this column.
+    "champion_version": {str(v) for v in range(1, 100)},
+    "new_version": {str(v) for v in range(1, 100)},
 }
 
 
@@ -227,6 +244,25 @@ def publish_drift(drift: pd.DataFrame) -> pd.DataFrame:
     return _numbers(drift, {"drift_check", "period", "subject", "status"}).round(3)
 
 
+def publish_retrain_history(history: pd.DataFrame) -> pd.DataFrame:
+    """The retraining loop's rows (D75), refused if anything in them is not a
+    rate, a known label or a feature name, or if a count could be 1-10."""
+    history = _numbers(history.assign(as_of=pd.to_datetime(history["as_of"]),
+                                      triggered=history["triggered"].astype(bool)),
+                       RETRAIN_TEXT | {"as_of"})
+    shifted = {name for cell in history["shifted_features"].dropna()
+               for name in cell.split(",") if name}
+    if shifted - set(FEATURES):
+        raise SystemExit("refusing to publish: shifted_features holds a name that is not a feature")
+    # The window size, and the flagged stays a rate implies, must not be 1-10.
+    flagged = (history["champion_rate"] * history["check_stays"]).round()
+    for counts in (history["check_stays"], flagged):
+        if counts.between(1, SUPPRESS_BELOW - 1).any():
+            raise SystemExit("refusing to publish: a retraining window implies a 1-10 count")
+    check_only_categories(history.drop(columns=["shifted_features", "triggered"]))
+    return history
+
+
 def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
     frames = {}
     with dbx.connect() as conn, conn.cursor() as cur:
@@ -251,6 +287,9 @@ def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
             frames[name] = publish(pd.DataFrame(cur.fetchall(),
                                                 columns=[d[0] for d in cur.description]))
             check_only_categories(frames[name])
+        cur.execute(RETRAIN_HISTORY.format(catalog=catalog))
+        frames["retrain_history"] = publish_retrain_history(
+            pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description]))
     return frames
 
 

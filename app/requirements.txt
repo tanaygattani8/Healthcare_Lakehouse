@@ -1,6 +1,8 @@
 # Streamlit Cloud reads this instead of the root requirements.txt. App-only
 # dependencies; the pipeline's belong in the root file. See errors.md E23.
-streamlit==1.39.0
+streamlit==1.65.0
+# The app draws its charts with Altair directly (app/ui.py); Streamlit 1.65 needs <6.
+altair==5.5.0
 pyyaml==6.0.3
 pandas==2.2.3
 pyarrow==16.1.0

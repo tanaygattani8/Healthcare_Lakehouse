@@ -7,6 +7,7 @@ from scripts.publish_snapshot import (
     check_small_cells,
     publish_drift,
     publish_model_results,
+    publish_retrain_history,
 )
 
 
@@ -139,3 +140,36 @@ def test_model_labels_are_known_and_nothing_else_passes():
         check_only_categories(pd.DataFrame({"subject": ["patient_id"]}))
     with pytest.raises(SystemExit):
         check_only_categories(pd.DataFrame({"model_verdict": ["probably"]}))
+
+
+def _history(**overrides):
+    row = {"as_of": "2021-01-01", "mode": "replay", "champion_version": "2",
+           "check_stays": 434, "target": 0.218, "champion_rate": 0.316,
+           "champion_low": 0.274, "champion_high": 0.361, "triggered": True,
+           "cutoff_rate": 0.23, "cutoff_workload": "pass", "retrain_rate": 0.237,
+           "retrain_workload": "pass", "retrain_ranking": "not worse",
+           "outcome": "new cutoff", "new_version": "4",
+           "shifted_features": "conditions_at_admit,admit_reason"}
+    return pd.DataFrame([row | overrides])
+
+
+def test_retrain_history_publishes_rates_and_known_labels():
+    out = publish_retrain_history(_history())
+    assert out["as_of"].dtype.kind == "M" and out["champion_rate"][0] == 0.316
+    assert out["shifted_features"][0] == "conditions_at_admit,admit_reason"
+    # A row that was not triggered has no challenger: NULLs stay numbers.
+    quiet = publish_retrain_history(_history(triggered=False, cutoff_rate=None,
+                                             cutoff_workload=None, outcome="no trigger"))
+    assert np.isnan(quiet["cutoff_rate"][0])
+
+
+@pytest.mark.parametrize("bad", [
+    {"shifted_features": "patient_id"},          # not a feature name
+    {"outcome": "Jane Doe"},                     # not a known label
+    {"check_stays": 7},                          # a 1-10 count (D66)
+    {"champion_rate": 0.02},                     # 0.02 x 434 flags 1-10 stays
+])
+def test_retrain_history_refuses_what_it_does_not_know(bad):
+    with pytest.raises(SystemExit):
+        publish_retrain_history(_history(**bad))
+

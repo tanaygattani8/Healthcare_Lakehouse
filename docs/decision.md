@@ -2816,3 +2816,78 @@ Each decision is honest about what it measured; none is precise.
   - a trend test across cursors (the trigger's blindness).
 - A DAG pattern that any further model can follow: a gate first, one
   compute job, a branch on its outcome, then downstream.
+
+### D76 — the public app redesigned: a pipeline map and research-paper chapters
+
+**Why.** The Streamlit app was five stock pages: titles, `st.metric` tiles,
+default bar charts and grey captions under each. It looked like every other
+Streamlit app, ended at phase 6, and still showed phase 2's numbers on its
+home page. A recruiter scanning it saw a generic dashboard, not a lakehouse.
+
+**The idea, chosen from three directions mocked up with real numbers** (a
+research paper, a clinical lab report, a pipeline map):
+- **The home page is the architecture.** A transit-style map from Synthea
+  through bronze, silver and gold to the story, the model and the retraining
+  loop. Each station is a chapter, carries the one number that chapter
+  answers (computed from the snapshots), and opens it.
+- **The chapters read like a research paper.** A kicker, a title and a
+  standfirst; key numbers in a monospace face; numbered figures; verdicts as
+  stamps; and every caveat and decision number as a numbered margin note
+  instead of a grey caption. Tables move into "Method" expanders, so the
+  reading column holds prose, numbers and figures.
+- **"Layer metals".** Bronze, silver and gold are the map's lines and the
+  pages' accents, on paper (light) or the map's night canvas (dark); the app
+  follows the viewer's setting. Fraunces for titles, Source Serif 4 for text,
+  JetBrains Mono for numbers, Inter for labels.
+
+**What changed.**
+- **Six chapters, not five:** chapter 6, "The model keeps its promise", is
+  phase 9's retraining loop (D75): the seven runs, each champion's flag rate
+  with its interval against the budget, and both challengers.
+- **A new snapshot, `retrain_history.parquet`,** from `ml.retrain_history`.
+  `publish_retrain_history` refuses anything that is not a rate, a known
+  label or a feature name, and any window or flagged count of 1-10. Five
+  new tests.
+- **Chapter 5 shows the verdict's own evidence:** the model-minus-rule
+  difference with its 95% interval against zero, for both populations. A
+  recall chart would have shown only the base rate: every model and rule
+  recall rests on 1-10 readmissions caught or missed and is hidden (D66).
+- **Chapter 4's signals are small multiples on one shared axis,** with each
+  level's 95% interval and the overall rate dashed. The old page gave every
+  signal its own axis, so they could not be compared.
+- **The numbers are live, not typed.** The old home page said 104
+  quarantined rows of 3.28 million: phase 2's batch alone. With D65's second
+  batch it is 1,023 of 36.3 million, and the map now reads it from the
+  snapshot.
+- **The model's live champion is v5** (chapter 5's margin), not v2.
+
+**How it is built.**
+- `app/streamlit_app.py` is a router: `st.navigation(position="top")` over
+  `app/chapters/` (home, then c1-c6).
+- `app/ui.py` is the design kit: `chapter()`, `section()` (a reading
+  column and its margin, which drops below on a phone), `numbers()`,
+  `stamp()`, `notes()`, `figure()` (an Altair chart in the app's theme plus
+  its numbered caption), `strip()` (the map as a "you are here" line),
+  `pager()` and `colophon()`. `app/style.css` is the one stylesheet; it names
+  no colour, and `ui.style()` prepends the palette for the viewer's mode
+  (`st.context.theme`).
+- `.streamlit/config.toml` sets both modes (`[theme.light]`, `[theme.dark]`)
+  and the Google fonts. Streamlit is upgraded from 1.39.0 to 1.65.0, and
+  Altair 5.5.0 is pinned, in both requirement files.
+- **The chart palette was validated, not eyeballed:** the dataviz validator
+  passed bronze `#9A5A12` and steel `#3A68A8` on paper, gold `#B8861A` and
+  steel `#5B8FDB` on the dark canvas (lightness band, chroma, colour-blind
+  and normal-vision separation, contrast). Grey neutrals and a teal failed
+  first. Every two-series chart also carries direct labels or shapes.
+
+**Things found while building.**
+- `st.html`'s sanitiser drops SVG entirely; the map renders through
+  `st.markdown(..., unsafe_allow_html=True)`, links included.
+- Streamlit reruns a changed page script but keeps an imported module
+  (`ui.py`) cached until the server restarts.
+- Vega-Lite point charts include zero by default, which squashed chapter
+  6's 20-35% band into the top of the chart; their scales are now explicit.
+
+**Not done.** No page for the gates (phase 7: nothing aggregate to
+publish) or the operations dashboard (phase 8: behind the workspace login).
+`pyyaml` stays in `app/requirements.txt` though the app no longer imports it.

@@ -1,0 +1,46 @@
+/* The app's stylesheet (layer metals). app/ui.py prepends the palette as CSS
+   variables (--ink, --muted, --rule, --accent, --surface, --bg, --faint) for the
+   viewer's light or dark mode, so nothing here names a colour. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+[data-testid="stMainBlockContainer"] { max-width: 1120px; padding-top: 5.2rem; }
+.lh-kicker { font: 600 .72rem/1 'Inter', sans-serif; letter-spacing: .14em; text-transform: uppercase;
+              color: var(--accent); margin-bottom: .55rem; }
+.lh-title { font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: clamp(2rem, 4vw, 2.9rem);
+             line-height: 1.06; letter-spacing: -.01em; margin: 0 0 .9rem; color: var(--ink); }
+.lh-stand { font-size: 1.22rem; line-height: 1.5; color: var(--ink); max-width: 46rem; margin-bottom: .4rem; }
+.lh-h2 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: 1.55rem; line-height: 1.2;
+          margin: 2.2rem 0 .5rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--ink); }
+.lh-h2 small { font: 600 .7rem 'JetBrains Mono', monospace; color: var(--accent); display: block;
+                letter-spacing: .08em; margin-bottom: .35rem; }
+.lh-nums { display: flex; flex-wrap: wrap; gap: 1.2rem 2rem; margin: .6rem 0 .9rem; }
+.lh-num .v { font: 600 1.85rem/1.1 'JetBrains Mono', monospace; color: var(--ink); white-space: nowrap; }
+.lh-num .l { font: .78rem/1.35 'Inter', sans-serif; color: var(--muted); max-width: 12.5rem; margin-top: .25rem; }
+.lh-stamp { display: inline-block; border: 2px solid var(--accent); color: var(--accent);
+             font: 700 .76rem 'Inter', sans-serif; letter-spacing: .14em; text-transform: uppercase;
+             padding: .3rem .7rem; transform: rotate(-2.5deg); margin: .5rem 0 .8rem; }
+.lh-cap { font: .8rem/1.45 'Inter', sans-serif; color: var(--muted); border-top: 1px solid var(--ink);
+           padding-top: .4rem; margin: -.2rem 0 1.2rem; }
+.lh-cap b { color: var(--ink); font-weight: 600; }
+.lh-notes { font: .82rem/1.5 'Inter', sans-serif; color: var(--muted); padding-top: .3rem; }
+.lh-notes p { border-left: 2px solid var(--rule); padding-left: .75rem; margin: 0 0 1rem; }
+.lh-notes b { color: var(--ink); font: 600 .78rem 'JetBrains Mono', monospace; margin-right: .2rem; }
+.lh-notes i { color: var(--accent); font-style: normal; font-family: 'JetBrains Mono', monospace; font-size: .74rem; }
+.lh-finding { border-left: 3px solid var(--accent); padding: .1rem 0 .1rem 1rem; margin: .4rem 0 1.4rem;
+               font-size: 1.05rem; line-height: 1.55; }
+.lh-strip { margin: -.6rem 0 1.6rem; }
+.lh-toc { display: grid; grid-template-columns: repeat(3, 1fr);
+           border-top: 1px solid var(--rule); margin-top: .6rem; }
+.lh-toc a { display: block; padding: 1rem 1.2rem 1rem 0; border-bottom: 1px solid var(--rule);
+             text-decoration: none; color: var(--ink); }
+.lh-toc a:hover .t, .lh-toc a:focus-visible .t { color: var(--accent); }
+.lh-toc .n { font: 600 .74rem 'JetBrains Mono', monospace; color: var(--accent); }
+.lh-toc .t { font: 600 1.15rem/1.25 'Fraunces', Georgia, serif; margin: .25rem 0 .3rem; }
+.lh-toc .f { font: .82rem/1.45 'Inter', sans-serif; color: var(--muted); }
+.lh-colophon { font: .78rem/1.5 'Inter', sans-serif; color: var(--muted); border-top: 1px solid var(--rule);
+                padding-top: .8rem; margin-top: 2.5rem; }
+.lh-map a { text-decoration: none; }
+.lh-map a:hover text.st, .lh-map a:focus-visible text.st { fill: var(--accent); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* Six chapters: three columns, then two, then one. */
+@media (max-width: 900px) { .lh-toc { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .lh-toc { grid-template-columns: 1fr; } }
