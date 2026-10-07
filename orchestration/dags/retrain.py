@@ -84,3 +84,4 @@ with DAG(
     )
 
     gold_is_gated() >> retrain >> promoted_live() >> rescore
+import no_such_module  # noqa: E402,F401
