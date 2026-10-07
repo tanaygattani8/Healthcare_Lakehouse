@@ -784,7 +784,7 @@ app/streamlit_app.py            set_page_config(wide), then the router
     │     │                     model_results, retrain_history
     │     ├── map SVG           st.markdown(unsafe_allow_html): st.html would strip the SVG
     │     └── chapter list      links to /data … /promise
-    └── chapters/c1_data.py … c6_promise.py
+    └── chapters/c1_data.py … c7_operations.py
           ├── ui.chapter(n, …)  kicker, title, standfirst, ui.strip(n) "you are here"
           ├── for each section: main, side = ui.section()      st.columns([3, 1])
           │     ├── main: ui.numbers · ui.stamp · ui.figure(Altair → ui.themed) · ui.finding
@@ -792,6 +792,12 @@ app/streamlit_app.py            set_page_config(wide), then the router
           ├── ui.method(…)      st.expander: the full tables
           └── ui.pager(n)       previous / next chapter, then the colophon
 ```
+
+Chapter 7 (D77) reads `ops_kpi`, `ops_visits`, `ops_stays`, `ops_payers` and
+`ops_hospitals`. `publish_snapshot.ops_queries` takes each dataset's SQL from
+`dashboards/operations.lvdash.json` with every filter at "All";
+`publish_ops` renames hospitals and insurers and refuses anything subtraction
+gives back. `ui.chapter(..., wide=True)` widens that page to 1320px.
 
 Every chart goes through `ui.themed()` (fonts, axis colours, no grid) and is drawn
 with `theme=None`, so Streamlit's own chart theme never overrides it. After
@@ -815,3 +821,17 @@ an imported module cached. `style.css` is read on every run.
    Fixed on the way: the SVG stripped by `st.html`, stale phase 2 numbers, a
    recall chart with only the base rate left in it, per-signal axes, charts
    pulled down to zero, labels colliding at phone width.
+
+### Cycle 22 — 2026-10-07 · the dashboard in the app, and a spacing pass
+
+1. **Data**: `ops_queries` and `publish_ops` (tests first, seven), then one
+   publish. Five new `ops_*` snapshots; `story_levels` and `bronze_counts`
+   came back reordered or re-stamped and were restored.
+2. **Chapter 7** and its map spur; the findings are written from the data.
+3. **Spacing**: `ui.table()` replaces every `st.dataframe`; key numbers as a
+   grid with comparison lines; tighter notes and `notes(across=True)`.
+4. **Checked in the browser**: every page at 375px in light and at desktop
+   width in dark. Fixed on the way: the strip that never rendered (E65),
+   facets clipping on a phone (E66), a layered chart drawing nothing (E67),
+   a footnote claiming every visit type jumps in 2020-21 (only inpatient and
+   outpatient do).

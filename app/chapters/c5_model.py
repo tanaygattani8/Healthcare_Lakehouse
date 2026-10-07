@@ -122,23 +122,23 @@ with side:
 
 with ui.method("Every scorer, the per-patient breakdown, and the readmission rate"):
     every = results[results["patients"] == "all"]
-    st.dataframe(pd.DataFrame({
+    ui.table(pd.DataFrame({
         "population": every["population"].map(POPULATIONS),
         "scored by": every["scorer"].map(SCORERS),
         "caught %": every["recall"].map(lambda v: "hidden" if pd.isna(v) else f"{100 * v:.1f}"),
         "average precision": every["avg_precision"].round(3),
         "cross-validated": every["cv_avg_precision"].round(3),
-        "Brier": every["brier"].round(4)}), hide_index=True, width="stretch")
+        "Brier": every["brier"].round(4)}))
     breakdown = results[(results["patients"] != "all") & (results["scorer"] == "model")]
     st.caption("By patient, verdict only (some hold 1-10 readmissions): "
                + "; ".join(f"{POPULATIONS[r.population].lower()}, {r.patients}: {r.model_verdict}"
                            for r in breakdown.itertuples()) + ".")
     rate = drift[drift["drift_check"] == "readmission_rate"]
-    st.dataframe(pd.DataFrame({
+    ui.table(pd.DataFrame({
         "population": rate["subject"].map(POPULATIONS), "period": rate["period"],
         "readmission rate %": (100 * rate["value"]).round(2),
         "95% interval %": [f"{100 * lo:.2f}–{100 * hi:.2f}"
                            for lo, hi in zip(rate["low"], rate["high"], strict=True)],
-        "status": rate["status"]}), hide_index=True, width="stretch")
+        "status": rate["status"]}))
 
 ui.pager(5)

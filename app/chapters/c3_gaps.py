@@ -1,7 +1,6 @@
 """Chapter 3: care gaps, three HEDIS-style measures built in gold."""
 
 import altair as alt
-import streamlit as st
 import ui
 
 MEASURES = {"bp_control": "Blood pressure under 140/90",
@@ -46,8 +45,7 @@ with side:
              f"Only people alive on 1 January {year} are in a measure's group. <i>D59</i>")
 
 with ui.method("The measure table: denominator, exclusions, gaps"):
-    st.dataframe(gaps[["measure", "in_denominator", "excl_age", "excl_died", "excl_hospice",
-                       "eligible", "met", "gaps"]].sort_values("measure"),
-                 hide_index=True, width="stretch")
+    ui.table(gaps[["measure", "in_denominator", "excl_age", "excl_died", "excl_hospice",
+                   "eligible", "met", "gaps"]].sort_values("measure"))
 
 ui.pager(3)

@@ -2,7 +2,6 @@
 rule is kept in quarantine rather than dropped."""
 
 import altair as alt
-import streamlit as st
 import ui
 
 df = ui.snapshot("bronze_counts")
@@ -55,8 +54,7 @@ with side:
 with ui.method("The quality table"):
     dq["failure rate %"] = (100 * dq["rows_quarantined"]
                             / (dq["rows_passed"] + dq["rows_quarantined"])).round(4)
-    st.dataframe(dq.astype({"rows_quarantined": int}), hide_index=True, width="stretch")
-    st.dataframe(bronze[["entity", "rows"]].rename(columns={"entity": "bronze file"}),
-                 hide_index=True, width="stretch")
+    ui.table(dq.astype({"rows_quarantined": int}))
+    ui.table(bronze[["entity", "rows"]].rename(columns={"entity": "bronze file"}))
 
 ui.pager(1)

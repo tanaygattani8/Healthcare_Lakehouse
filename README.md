@@ -8,7 +8,8 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 **Live:** https://healthcarelakehouse.streamlit.app/
 
 **Status:** The public app was redesigned (D76): the home page is the pipeline drawn
-as a map, and each stop is a chapter written like a research paper. Phase 9
+as a map, and each stop is a chapter written like a research paper. Chapter 7
+puts phase 8's operations dashboard on the public page for the first time (D77). Phase 9
 complete: an Airflow DAG that retrains on drift,
 replayed year by year over 2021-2026 before it was allowed to move the live
 model. It judges the review workload, not accuracy, and it found its own
@@ -30,9 +31,9 @@ older and sicker than the ones the model learned from.
 ## The app
 
 The home page is the lakehouse drawn as a transit map: Synthea, bronze,
-silver, gold, then the story, the model and the retraining loop. Each station
-carries the one number its chapter answers and opens that chapter. The six
-chapters read like a research paper: a standfirst, the key numbers, numbered
+silver, gold, then the story, the model and the retraining loop, with the
+operations dashboard on a spur off gold. Each station carries the one number
+its chapter answers and opens that chapter. The first six chapters read like a research paper: a standfirst, the key numbers, numbered
 figures, a verdict stamped on the page, and every caveat and decision number
 in the margin. Bronze, silver and gold are the map's lines and the pages'
 accents, in light or dark to match the reader (D76).
@@ -45,9 +46,12 @@ accents, in light or dark to match the reader (D76).
 | 04 Who comes back | the 30-day readmission story, in five sections (earlier sections call it app page 4) |
 | 05 Can a model beat one rule? | the model's verdict and its drift (app page 5) |
 | 06 The model keeps its promise | phase 9's retraining loop, replayed and then run live |
+| 07 Running the network | phase 8's dashboard, default view: KPIs against the prior year, findings and recommendations, trends, payers and hospitals |
 
 It reads only the published snapshots, never the warehouse. Every number on
-it is computed from them, and any group of 1-10 is hidden.
+it is computed from them, and any group of 1-10 is hidden. Chapter 7's numbers
+come from the dashboard's own SQL, and its hospital and insurer names are made
+up before publishing: Synthea takes them from real ones (D77).
 
 ## What phase 9 produced
 

@@ -3,7 +3,6 @@ and then run once for real. Rates and verdicts only."""
 
 import altair as alt
 import pandas as pd
-import streamlit as st
 import ui
 
 h = ui.snapshot("retrain_history").copy()
@@ -93,10 +92,9 @@ with ui.method("Every run, as recorded in ml.retrain_history"):
                          for lo, hi in zip(h["champion_low"], h["champion_high"], strict=True)],
         "new cutoff %": (100 * h["cutoff_rate"]).round(1),
         "retrain %": (100 * h["retrain_rate"]).round(1)})
-    st.dataframe(table[["cursor", "mode", "champion_version", "check_stays", "champion %",
-                        "95% interval", "triggered", "new cutoff %", "cutoff_workload",
-                        "retrain %", "retrain_workload", "retrain_ranking", "outcome",
-                        "new_version", "shifted_features"]],
-                 hide_index=True, width="stretch")
+    ui.table(table[["cursor", "mode", "champion_version", "check_stays", "champion %",
+                    "95% interval", "triggered", "new cutoff %", "cutoff_workload",
+                    "retrain %", "retrain_workload", "retrain_ranking", "outcome",
+                    "new_version", "shifted_features"]])
 
 ui.pager(6)

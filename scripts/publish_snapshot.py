@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 from pathlib import Path
 
 import numpy as np
@@ -128,7 +129,23 @@ ADMIT_REASONS = {
     "Appendicitis (disorder)",
     "Sleep disorder (disorder)",
 }
+# Phase 8's dashboard (D74), default view: every filter "All". Its own SQL, so
+# the app shows what the dashboard shows and shown() runs in one place.
+BOARD = Path(__file__).resolve().parents[1] / "dashboards" / "operations.lvdash.json"
+OPS_DATASETS = ("kpi_visits", "kpi_stays", "kpi_readmission", "visits_trend",
+                "stays_trend", "by_payer", "by_hospital")
+OPS_WINDOW = ("SELECT window_start, last_month, prior_start, prior_end "
+              "FROM {catalog}.metrics.kpi_window")
+# Synthea's hospitals and insurers are real names. Synthetic costs beside them
+# would read as claims about them, so only government programmes keep a name.
+PROGRAMMES = {"Medicare": "Medicare", "Medicaid": "Medicaid", "Dual Eligible": "Dual Eligible",
+              "NO_INSURANCE": "No insurance"}
+VISIT_TYPES = {"ambulatory", "emergency", "inpatient", "other", "outpatient", "urgentcare",
+               "wellness"}
 ALLOWED_TEXT = {
+    "payer": set(PROGRAMMES.values()) | {f"Commercial payer {i}" for i in range(1, 51)},
+    "hospital": {f"Hospital {chr(c)}" for c in range(ord("A"), ord("Z") + 1)},
+    "visit_type": VISIT_TYPES,
     "measure": {"diabetes_hba1c", "bp_control", "statin_therapy"},
     "stage": {"roster", "regex", "ner", "llm"},
     "phi_category": {"name", "date", "age", "geography", "other_id", "zip"},
@@ -263,6 +280,58 @@ def publish_retrain_history(history: pd.DataFrame) -> pd.DataFrame:
     return history
 
 
+def ops_queries(catalog: str) -> dict[str, tuple[str, dict]]:
+    """Each dataset's SQL from the exported dashboard, with its filters at "All"."""
+    board = json.loads(BOARD.read_text(encoding="utf-8"))
+    return {ds["name"]: ("".join(ds["queryLines"]).replace("healthcare_dev.", f"{catalog}."),
+                         {p["keyword"]: "All" for p in ds.get("parameters", [])})
+            for ds in board["datasets"] if ds["name"] in OPS_DATASETS}
+
+
+def _ops_frame(df: pd.DataFrame, text: set[str] = frozenset(),
+               dates: tuple[str, ...] = ()) -> pd.DataFrame:
+    df = _numbers(df, set(text) | set(dates))
+    return df.assign(**{c: pd.to_datetime(df[c]) for c in dates})
+
+
+def publish_ops(raw: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    """The dashboard's default view with made-up hospital and insurer names,
+    refused if a count is 1-10 or subtraction against a tile gives one back."""
+    kpi = pd.concat([raw[n] for n in ("kpi_visits", "kpi_stays", "kpi_readmission",
+                                      "kpi_window")], axis=1)
+    # With no filter, share of network is always 100 and every network gap 0.
+    kpi = _ops_frame(kpi.drop(columns=[c for c in kpi if "network" in c]),
+                     dates=("window_start", "last_month", "prior_start", "prior_end"))
+    visits = _ops_frame(raw["visits_trend"], {"visit_type"}, ("visit_month",))
+    stays = _ops_frame(raw["stays_trend"], dates=("admit_quarter",))
+    payers = _ops_frame(raw["by_payer"], {"payer"})
+    commercial = payers.loc[~payers["payer"].isin(PROGRAMMES), "payer"]
+    labels = {name: f"Commercial payer {i}" for i, name in enumerate(commercial, 1)}
+    payers["payer"] = payers["payer"].map({**PROGRAMMES, **labels})
+    hospitals = _ops_frame(raw["by_hospital"], {"hospital"})
+    if len(hospitals) > 26:
+        raise SystemExit("refusing to publish: more hospitals than letters")
+    hospitals["hospital"] = [f"Hospital {chr(ord('A') + i)}" for i in range(len(hospitals))]
+
+    if visits["visits"].isna().any() or stays["stays"].isna().any():
+        raise SystemExit("refusing to publish: a hidden trend cell, which the tiles give back")
+    small = range(1, SUPPRESS_BELOW)
+    for frame, column in ((visits, "visits"), (stays, "stays"), (payers, "stays"),
+                          (hospitals, "stays")):
+        if frame[column].between(1, SUPPRESS_BELOW - 1).any():
+            raise SystemExit(f"refusing to publish: a shown {column} is 1-10")
+    total = kpi["stays"].iloc[0]
+    if payers["stays"].isna().sum() == 1 or total - payers["stays"].sum() in small:
+        raise SystemExit("refusing to publish: the stays tile gives back a hidden payer")
+    if total - hospitals["stays"].sum() in small:
+        raise SystemExit("refusing to publish: the hospitals left out hold 1-10 stays")
+    out = {"ops_kpi": kpi, "ops_visits": visits, "ops_stays": stays, "ops_payers": payers,
+           "ops_hospitals": hospitals}
+    for frame in out.values():
+        check_only_categories(frame)
+    return out
+
+
 def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
     frames = {}
     with dbx.connect() as conn, conn.cursor() as cur:
@@ -290,6 +359,12 @@ def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
         cur.execute(RETRAIN_HISTORY.format(catalog=catalog))
         frames["retrain_history"] = publish_retrain_history(
             pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description]))
+        raw = {}
+        for name, (query, params) in [*ops_queries(catalog).items(),
+                                      ("kpi_window", (OPS_WINDOW.format(catalog=catalog), {}))]:
+            cur.execute(query, params)
+            raw[name] = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
+        frames.update(publish_ops(raw))
     return frames
 
 

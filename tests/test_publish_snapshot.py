@@ -1,3 +1,5 @@
+import datetime as dt
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -5,8 +7,10 @@ import pytest
 from scripts.publish_snapshot import (
     check_only_categories,
     check_small_cells,
+    ops_queries,
     publish_drift,
     publish_model_results,
+    publish_ops,
     publish_retrain_history,
 )
 
@@ -173,3 +177,82 @@ def test_retrain_history_refuses_what_it_does_not_know(bad):
     with pytest.raises(SystemExit):
         publish_retrain_history(_history(**bad))
 
+
+
+# Phase 8's dashboard, published for the app's Operations chapter.
+def _ops_raw(**over):
+    raw = {
+        "kpi_visits": pd.DataFrame({"visits": [54000], "visits_prior": [54500],
+                                    "visits_change_pct": [-0.9],
+                                    "visits_share_of_network_pct": [100.0]}),
+        "kpi_stays": pd.DataFrame({"stays": [497], "stays_prior": [469],
+                                   "stays_change_pct": [6.0], "cost_per_stay": [24200],
+                                   "cost_vs_network_pct": [0.0]}),
+        "kpi_readmission": pd.DataFrame({"readmission_rate_pct_2020_2026": [1.39],
+                                         "readmission_rate_pct_2010_2019": [1.49]}),
+        "kpi_window": pd.DataFrame({"window_start": [dt.date(2025, 8, 1)],
+                                    "last_month": [dt.date(2026, 7, 1)],
+                                    "prior_start": [dt.date(2024, 8, 1)],
+                                    "prior_end": [dt.date(2025, 7, 1)]}),
+        "visits_trend": pd.DataFrame({"visit_month": [dt.date(2026, 7, 1)] * 2,
+                                      "visit_type": ["inpatient", "wellness"],
+                                      "visits": [40, 900]}),
+        "stays_trend": pd.DataFrame({"admit_quarter": [dt.date(2026, 4, 1)], "stays": [120],
+                                     "avg_length_of_stay_days": [5.1],
+                                     "cost_per_stay": [24000]}),
+        "by_payer": pd.DataFrame({"payer": ["Medicare", "Humana", "NO_INSURANCE", "Aetna",
+                                            "Cigna Health"],
+                                  "stays": [400, 40, None, None, None],
+                                  "avg_length_of_stay_days": [5.4, 3.6, None, None, None],
+                                  "cost_per_stay": [32034, 13434, None, None, None]}),
+        "by_hospital": pd.DataFrame({"hospital": ["CAPE COD HOSPITAL INC, HYANNIS",
+                                                  "TEWKSBURY HOSPITAL, TEWKSBURY"],
+                                     "stays": [300, 150], "avg_length_of_stay_days": [6.1, 6.5],
+                                     "cost_per_stay": [33256, 2201]}),
+    }
+    return {**raw, **over}
+
+
+def test_ops_publish_replaces_real_names():
+    out = publish_ops(_ops_raw())
+    assert list(out["ops_payers"]["payer"]) == ["Medicare", "Commercial payer 1", "No insurance",
+                                                "Commercial payer 2", "Commercial payer 3"]
+    assert list(out["ops_hospitals"]["hospital"]) == ["Hospital A", "Hospital B"]
+    text = " ".join(str(v) for f in out.values() for v in f.to_numpy().ravel())
+    for real in ("Humana", "Aetna", "Cigna", "CAPE COD", "TEWKSBURY"):
+        assert real not in text
+
+
+def test_ops_publish_drops_the_always_100_share_and_network_gaps():
+    kpi = publish_ops(_ops_raw())["ops_kpi"]
+    assert "visits_share_of_network_pct" not in kpi
+    assert "cost_vs_network_pct" not in kpi
+    assert kpi["window_start"].iloc[0] == pd.Timestamp(2025, 8, 1)
+
+
+@pytest.mark.parametrize("over", [
+    # A hidden trend cell: the 12-month tiles would give it back by subtraction.
+    {"visits_trend": pd.DataFrame({"visit_month": [dt.date(2026, 7, 1)],
+                                   "visit_type": ["other"], "visits": [None]})},
+    # A shown count of 1-10.
+    {"by_hospital": pd.DataFrame({"hospital": ["X"], "stays": [7],
+                                  "avg_length_of_stay_days": [5.0], "cost_per_stay": [1.0]})},
+    # Hospitals left out (1-10 stays each) that add up to 1-10 against the tile.
+    {"by_hospital": pd.DataFrame({"hospital": ["X"], "stays": [490],
+                                  "avg_length_of_stay_days": [5.0], "cost_per_stay": [1.0]})},
+    # Exactly one hidden payer: the tile minus the rest is its count.
+    {"by_payer": pd.DataFrame({"payer": ["Medicare", "Aetna"], "stays": [450, None],
+                               "avg_length_of_stay_days": [5.4, None],
+                               "cost_per_stay": [1.0, None]})},
+])
+def test_ops_publish_refuses_what_subtraction_gives_back(over):
+    with pytest.raises(SystemExit):
+        publish_ops(_ops_raw(**over))
+
+
+def test_ops_queries_are_the_dashboards_own():
+    queries = ops_queries("healthcare_dev")
+    assert set(queries) == {"kpi_visits", "kpi_stays", "kpi_readmission", "visits_trend",
+                            "stays_trend", "by_payer", "by_hospital"}
+    sql, params = queries["by_payer"]
+    assert "metrics.shown(" in sql and set(params.values()) == {"All"}

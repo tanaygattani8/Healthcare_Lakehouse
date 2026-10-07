@@ -77,11 +77,10 @@ with side:
              "Synthea batch, the one with notes.")
 
 with ui.method("Every program's scores, and its false alarms"):
-    st.dataframe(real[["program", "phi_category", "real_items", "guesses", "precision", "recall",
-                       "covered_recall", "exact_recall"]].sort_values(["phi_category", "program"]),
-                 hide_index=True, width="stretch")
+    ui.table(real[["program", "phi_category", "real_items", "guesses", "precision", "recall",
+                   "covered_recall", "exact_recall"]].sort_values(["phi_category", "program"]))
     false = scores[scores["real_items"].isna()]
-    st.dataframe(false[["program", "phi_category", "guesses"]], hide_index=True, width="stretch")
+    ui.table(false[["program", "phi_category", "guesses"]])
     st.caption("False alarms: flagged as private where the test notes hold none. Ages under 90, "
                "insurers read as identifiers, ethnicity read as a place, doses read as ZIP codes.")
 
