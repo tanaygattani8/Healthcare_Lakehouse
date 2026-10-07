@@ -835,3 +835,31 @@ an imported module cached. `style.css` is read on every run.
    facets clipping on a phone (E66), a layered chart drawing nothing (E67),
    a footnote claiming every visit type jumps in 2020-21 (only inpatient and
    outpatient do).
+
+## Entry point 9 — CI on a pull request (GitHub Actions, gates main)
+
+**Invoked by:** a pull request to `main`, and every push to `main`.
+**Reads:** the repo, and the `DATABRICKS_HOST` / `DATABRICKS_TOKEN` secrets.
+**Writes:** check runs named `lint`, `bundle`, `dags`.
+
+```
+pull_request -> .github/workflows/pr.yml (one concurrency group per PR)
+├── lint     pip install -r requirements.txt -> ruff check . -> pytest -q
+├── bundle   databricks bundle validate -t dev, -t prod
+└── dags     docker build orchestration -> ci_check_dags.py in the image
+             (DagBag over dags/: no import errors, ids == {medallion, retrain})
+      | all three green, branch up to date (branch protection, admins included)
+gh pr merge --squash -> push to main -> the same three jobs re-run
+```
+
+### Cycle 23 — 2026-10-07 · Phase 10 · CI becomes a gate
+
+1. Probe 1: the DAG check in the real image; `include_examples` gone (E68).
+2. The pin test (found the unpinned `pyarrow`) and the growth test, each seen
+   failing.
+3. `pr.yml`: a `dags` job and a concurrency group.
+4. Pull request #4: three green; `dags` 56 s.
+5. Squash-only merges, then branch protection, read back.
+6. Pull request #5 (broken import) read `BLOCKED`; a direct push to `main`
+   was refused (GH006).
+7. Docs; 8. merged through the gate.

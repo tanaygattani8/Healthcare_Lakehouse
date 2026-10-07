@@ -87,6 +87,10 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E62](#e62) | `bundle deploy`: "deletion or recreation of the following dashboards" | 8 |
 | [E63](#e63) | `httpx.ReadTimeout` again, on a stack up 25 minutes, with services reading `unhealthy` | 9 |
 | [E64](#e64) | A pasted heredoc runs as garbled Python (`strEOF breakidate_only"))…`) | 9 |
+| [E65](#e65) | The chapter strip's div is empty: `innerHTML ""` | app |
+| [E66](#e66) | Small-multiple charts cut off at the right on a phone | app |
+| [E67](#e67) | `Cannot read properties of undefined (reading 'forEach')` in `parseAxesAndHeaders` | app |
+| [E68](#e68) | `DagBag.__init__() got an unexpected keyword argument 'include_examples'` | 10 |
 
 ---
 
@@ -1057,6 +1061,12 @@ install` and both bundle validations passed, then `ruff check .` failed and
 nothing, so the step was checked, not just the verdict. The gate is now known
 to pass and known to fail. E33 is closed.
 
+**A gate since D78 (phase 10).** The "smoke alarm rather than a gate" above is
+over: branch protection on `main` requires `lint`, `bundle` and `dags`, admins
+included, and every change arrives by pull request. Seen holding: a pull request
+with a broken DAG import read `BLOCKED` (#5), and a direct push to `main` was
+refused (GH006).
+
 ---
 
 ## Phase 3a — PHI governance
@@ -1831,3 +1841,17 @@ dot layers on the same x field kept the default axis. Vega-Lite's axis merge
 fails on the mix, and the chart draws nothing.
 
 **Fix.** Give every layer the same `axis` value.
+
+### E68 — Airflow 3.3's DagBag refuses `include_examples` {#e68}
+```
+TypeError: DagBag.__init__() got an unexpected keyword argument 'include_examples'
+```
+
+**Cause.** The plan's DAG check was written against the Airflow 2 call. In
+3.3.2 `DagBag` lives in `airflow.dag_processing.dagbag` and takes
+`dag_folder, safe_mode, load_op_links, collect_dags, known_pools,
+bundle_path, bundle_name`.
+
+**Fix.** `DagBag("/opt/airflow/dags")`. An example DAG, if one ever loaded,
+would still fail the check's exact-ids rule. Found by probe 1, before the
+check reached CI.

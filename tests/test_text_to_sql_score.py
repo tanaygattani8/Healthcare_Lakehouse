@@ -71,14 +71,21 @@ def test_answer_column_found_in_a_wide_result():
     assert results_match([(5,)], [(8, 7, 6, 5, 4, 3, 2, 1, 0)])
 
 
-def test_wide_result_with_many_rows_is_scored_quickly():
+def test_wide_result_scoring_grows_linearly_not_quadratically():
+    # A 5 s clock limit failed on a busy machine: the work takes 1.8 s on a
+    # quiet one. Two sizes timed on the same machine slow down together, so
+    # their ratio does not flake. 1,000 to 10,000 rows measured 8.6x; linear
+    # work is ~10x, quadratic ~100x (phase 10).
     expected = [(i, i * 2, i * 3, i * 4) for i in range(10_000)]
     actual = [(0, i * 4, 1, i, 2, i * 3, 3, i * 2) for i in range(10_000)]
-    start = time.perf_counter()
-    result = results_match(expected, actual)
-    elapsed = time.perf_counter() - start
-    assert result is True
-    assert elapsed < 5
+
+    def timed(n: int) -> float:
+        start = time.perf_counter()
+        assert results_match(expected[:n], actual[:n]) is True
+        return time.perf_counter() - start
+
+    small, large = timed(1_000), timed(10_000)
+    assert large < 30 * small, f"10,000 rows {large:.2f}s vs 1,000 rows {small:.2f}s"
 
 
 def test_nan_equals_nan():

@@ -2946,7 +2946,80 @@ phone width):
 - the footer's GitHub link opens a new tab (GitHub refuses to load inside
   streamlit.app's frame), and the map's ignored `url_path="map"` is gone.
 
-**Not done.** The README's dashboard screenshot still shows the real
-hospital and insurer names, so a reader can match "Hospital A" to a real
-name by its numbers. It needs a retake with the names cropped, or replacing
-with the app's chapter.
+**The README screenshot.** The old one showed the real hospital and insurer
+names, so a reader could match "Hospital A" to a real name by its numbers.
+It is replaced by a capture of chapter 7 (`docs/img/operations-chapter.png`).
+The old image stays in git history; rewriting history for it was not worth
+breaking every clone. A "hidden" cell is now right-aligned like the numbers
+it stands in for, which the capture showed it was not.
+
+### D78 — phase 10: CI becomes a gate
+
+**Why.**
+- CI was an alarm, not a gate (E33's own words): every phase was merged
+  locally and pushed to `main`, so checks reported after the code had
+  landed. `main` is what the public Streamlit app deploys.
+- The Airflow DAGs were never loaded in CI. ruff lints them as Python; a
+  wrong Airflow import or a DAG that stops parsing passed green.
+- Nothing checked that the app's pins match the project's (the note after
+  D26: "not enforced today").
+- One test flaked: a 5 s clock limit on work that takes 1.8 s on a quiet
+  laptop and crosses 5 s under load. A flaky test in a blocking gate blocks
+  merges on noise.
+
+**The gate** (set with `gh api`, read back 2026-10-07):
+`{"admins":true,"checks":["lint","bundle","dags"],"delete":false,"force":false,"linear":true,"reviews":0,"strict":true}`.
+- `enforce_admins`: the only person who pushes is an admin, so without it
+  the gate would be optional for the one person it applies to.
+- 0 approvals: GitHub does not let an author approve their own pull request.
+- Squash merge only, head branches deleted on merge. A phase merges as
+  `git push -u origin phase-N`, `gh pr create --fill`,
+  `gh pr merge --squash`; one commit per phase, as before.
+
+**The third job, `dags`.** It builds `orchestration/Dockerfile`, the image
+the laptop runs, and parses `dags/` inside it with
+`orchestration/ci_check_dags.py`: no import errors, and the DAG ids exactly
+`{medallion, retrain}`, so a DAG that silently stops loading and a new one
+nobody added to the check both fail. The script sits beside `dags/`, not in
+it, because Airflow parses every file in `dags/`.
+
+**The two tests.**
+- `tests/test_requirements_agree.py`: every pin in `app/requirements.txt`
+  must be the root's pin. It found one gap on day one, an unpinned
+  `pyarrow` in the root file, now `pyarrow==16.1.0`.
+- The timing test became a growth test: 1,000 rows against 10,000, failing
+  above 30x. Linear work is about 10x (measured 8.6x and 8.2x), quadratic
+  about 100x (a stand-in measured 116x). Load slows both runs alike, so the
+  ratio holds where a clock limit did not.
+
+**Probes.**
+1. `DagBag` lives in `airflow.dag_processing.dagbag` in Airflow 3.3.2 and no
+   longer takes `include_examples` (E68). No metadata database is needed.
+2. `dags` takes 56 s on a GitHub runner, cold. No layer caching.
+3. `gh api` set branch protection with this login; no Settings clicks.
+4. `pip install -r requirements.txt` resolves with `pyarrow==16.1.0`
+   (`lint` green).
+
+**Proof, 2026-10-07.**
+- Phase 10's own pull request (#4): all three green before protection was
+  switched on, because GitHub can require only a check it has seen run.
+- Pull request #5 appended `import no_such_module  # noqa: E402,F401` to
+  `retrain.py`: `lint` and `bundle` passed, `dags` failed, and GitHub read
+  the pull request as `mergeStateStatus: BLOCKED`. The merge attempt itself
+  was stopped by the assistant's own safety check before it reached GitHub,
+  so the evidence is GitHub's merge state, not a refused merge command.
+  Closed unmerged, branch deleted.
+- An empty commit pushed straight to `main`: `GH006: Protected branch update
+  failed`, exit 1. Dropped locally.
+
+**Not done, and why.**
+- Continuous deployment (`bundle deploy -t dev` on merge): a separate
+  decision, which now has a trustworthy `main` to build on.
+- `--validate-only` in CI: it spends serverless quota on every pull request.
+- Type checking or SQL linting: no failure in this project's history asks
+  for them.
+- A service principal or OIDC: the personal token stays the Free Edition
+  degradation, now used by `bundle` on every pull request.
+
+**Emergency.** Turn `enforce_admins` off in Settings, merge, turn it back
+on. Each use is an errors.md entry.

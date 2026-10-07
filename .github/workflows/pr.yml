@@ -3,20 +3,25 @@ name: PR checks
 # Twice, broken code reached main because a check that would have caught it was
 # never run (errors.md E16, E22). This removes the option of forgetting.
 #
-# It did not. From 2026-09-15 to 2026-09-23 this workflow never executed once:
-# the trigger was pull_request only, and every commit in this repository's
-# history went straight to main. Zero runs, zero pull requests (errors.md E33).
+# Until phase 10 it was an alarm: it ran after commits had already landed on
+# main (E33). Since D78 it is a gate. Branch protection on main requires the
+# three jobs below, by these exact names (lint, bundle, dags), admins included,
+# so nothing reaches main without them green. Renaming a job means updating
+# branch protection in the same change, or every pull request waits forever
+# for a check that never comes.
 #
-# The push trigger is the honest fix for how this repository is actually
-# worked — solo, on main, with no PR in the loop. It reports AFTER the commit
-# has landed, so it is a smoke alarm and not a gate. The pull_request trigger
-# stays for the day a branch is used.
+# push to main re-checks the squashed commit, so main's status stays true.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+# A new push to a pull request cancels the run it replaces.
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -59,3 +64,21 @@ jobs:
       # pipeline on a tier that permits one, pointed at an empty landing volume,
       # spending the quota whose exhaustion locks compute for the rest of the
       # day. See the degradations table in README.md.
+
+  # The Airflow DAGs, loaded by the same image the laptop runs
+  # (orchestration/Dockerfile). ruff only lints them as Python; this catches a
+  # wrong Airflow import, a bad Param, or a DAG that stops loading. The
+  # pipeline id is a dummy: parsing reads the variable and calls nothing.
+  dags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: docker build -t healthcare-airflow orchestration
+
+      - name: Load the DAGs
+        run: >
+          docker run --rm -e MEDALLION_PIPELINE_ID=ci
+          -v "$PWD/orchestration/dags:/opt/airflow/dags:ro"
+          -v "$PWD/orchestration/ci_check_dags.py:/opt/airflow/ci_check_dags.py:ro"
+          healthcare-airflow python /opt/airflow/ci_check_dags.py
