@@ -56,31 +56,41 @@ def rates(signals: list[str], caption: str) -> None:
         name=lambda d: d["signal"].map(NAMES), overall=overall)
     hidden = levels[levels["signal"].isin(signals) & levels["suppressed"]]
     top = float(rows["high"].max()) * 1.05
-    x = alt.X("low:Q", title="30-day readmission rate",
-              axis=alt.Axis(format=".0%", tickMinStep=0.01),
-              scale=alt.Scale(domain=[0, top]))
-    base = alt.Chart().encode(
-        y=alt.Y("level:N", title=None, sort=None),
-        tooltip=[alt.Tooltip("name:N", title="signal"), alt.Tooltip("level:N"),
-                 alt.Tooltip("rate:Q", format=".2%"),
-                 alt.Tooltip("low:Q", title="95% from", format=".2%"),
-                 alt.Tooltip("high:Q", title="95% to", format=".2%"),
-                 alt.Tooltip("index_stays:Q", title="index stays", format=",")])
-    line = alt.Chart().mark_rule(color=p["accent"], strokeDash=[4, 4]).encode(
-        x=alt.X("overall:Q", scale=alt.Scale(domain=[0, top])))
-    whisker = base.mark_rule(strokeWidth=2, color=p["muted"], opacity=0.75).encode(
-        x=x, x2="high:Q")
-    dot = base.mark_point(filled=True, size=70, color=p["series"][0]).encode(
-        x=alt.X("rate:Q", scale=alt.Scale(domain=[0, top])))
-    chart = (alt.layer(line, whisker, dot, data=rows).properties(height=alt.Step(22), width=560)
-             .facet(row=alt.Row("name:N", title=None, sort=[NAMES[s] for s in signals],
-                                header=alt.Header(labelAngle=0, labelOrient="top",
-                                                  labelAlign="left", labelPadding=4)),
-                    spacing=12)
-             .resolve_scale(y="independent"))
+    scale = alt.Scale(domain=[0, top])
+    shown = [s for s in signals if (rows["signal"] == s).any()]
     gone = "; ".join(f"{NAMES[s]}: {', '.join(g['level'])}"
                      for s, g in hidden.groupby("signal", sort=False))
-    ui.figure(chart, f"4.{next(fig)}", caption + (f" Hidden: {ui.esc(gone)}." if gone else ""))
+    # One chart per signal rather than a facet: a facet has a fixed width and
+    # clips on a phone; separate charts stretch. The x domain is fixed, so the
+    # rows still share one axis, drawn under the last.
+    for s in shown:
+        last = s == shown[-1]
+        axis = alt.Axis(format=".0%", tickMinStep=0.01) if last else None
+        base = alt.Chart().encode(
+            # One fixed label gutter, so the rows' x axes line up.
+            y=alt.Y("level:N", title=None, sort=None,
+                    axis=alt.Axis(minExtent=78, maxExtent=78, labelLimit=74)),
+            tooltip=[alt.Tooltip("name:N", title="signal"), alt.Tooltip("level:N"),
+                     alt.Tooltip("rate:Q", format=".2%"),
+                     alt.Tooltip("low:Q", title="95% from", format=".2%"),
+                     alt.Tooltip("high:Q", title="95% to", format=".2%"),
+                     alt.Tooltip("index_stays:Q", title="index stays", format=",")])
+        line = alt.Chart().mark_rule(color=p["accent"], strokeDash=[4, 4]).encode(
+            x=alt.X("overall:Q", axis=axis, scale=scale))
+        whisker = base.mark_rule(strokeWidth=2, color=p["muted"], opacity=0.75).encode(
+            x=alt.X("low:Q", title="30-day readmission rate" if last else None, axis=axis,
+                    scale=scale), x2="high:Q")
+        dot = base.mark_point(filled=True, size=70, color=p["series"][0]).encode(
+            x=alt.X("rate:Q", axis=axis, scale=scale))
+        chart = alt.layer(line, whisker, dot, data=rows[rows["signal"] == s]).properties(
+            height=alt.Step(22), autosize=alt.AutoSizeParams(type="fit-x", contains="padding"),
+            title=alt.TitleParams(NAMES[s], anchor="start", fontSize=12, fontWeight=600,
+                                  color=p["ink"]))
+        if last:
+            ui.figure(chart, f"4.{next(fig)}",
+                      caption + (f" Hidden: {ui.esc(gone)}." if gone else ""))
+        else:
+            st.altair_chart(ui.themed(chart), width="stretch", theme=None)
 
 
 ui.chapter(4, "The readmission story", "Who comes back, and could we see it coming?",
@@ -102,7 +112,7 @@ with main:
              "Index stays (can start a 30-day window)"],
         "count": [t.stays, t.encounters_merged, t.excl_died, t.excl_short_followup,
                   t.excl_hospice, t.excl_cancer_treatment, t.index_stays]}).astype({"count": int})
-    st.dataframe(ledger, hide_index=True, width="stretch")
+    ui.table(ledger)
     rates(["admit_period"], "Readmission rate by the period admitted.")
     ui.finding(FINDINGS[1])
 with side:
@@ -168,8 +178,8 @@ with main:
             lambda r: "hidden" if r.suppressed else
             f"{100 * r.rest_rate:.1f} ({100 * r.rest_low:.1f}–{100 * r.rest_high:.1f})",
             axis=1)})
-    st.dataframe(table[["signal", "level", "index_stays", "rate % (95%)", "rest % (95%)",
-                        "separates"]], hide_index=True, width="stretch")
+    ui.table(table[["signal", "level", "index_stays", "rate % (95%)", "rest % (95%)",
+                    "separates"]])
     ui.finding(FINDINGS[5])
 with side:
     ui.notes("A level separates when both sides have 30+ stays, the higher rate comes from 10+ "
@@ -187,10 +197,10 @@ with main:
     s = scores[scores["set_name"] == name]
     s = (s.assign(correct=s["answers"].where(s["verdict"] == "correct", 0))
           .groupby(["contestant", "run_no", "tier"], as_index=False)[["correct", "answers"]].sum())
-    st.dataframe(s.assign(contestant=s["contestant"].map(CONTESTANTS), tier=s["tier"].map(TIERS),
-                          score=s["correct"].astype(str) + " of " + s["answers"].astype(str))
-                  .pivot(index=["contestant", "run_no"], columns="tier", values="score"),
-                 width="stretch")
+    ui.table(s.assign(contestant=s["contestant"].map(CONTESTANTS), tier=s["tier"].map(TIERS),
+                      score=s["correct"].astype(str) + " of " + s["answers"].astype(str))
+              .pivot(index=["contestant", "run_no"], columns="tier", values="score")
+              .reset_index().rename(columns={"run_no": "run"}))
 with side:
     ui.notes(f"The story's own questions ({name} set), asked in English. Each answer's SQL was "
              "run and compared with a hand-checked answer.",

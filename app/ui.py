@@ -47,6 +47,8 @@ CHAPTERS = [
      "+12.2 points caught, interval -3.0 to +29.0: no better."),
     (6, "chapters/c6_promise.py", "The promise", "The model keeps its promise",
      "Six years replayed: moving the cutoff was always enough, until it lagged."),
+    (7, "chapters/c7_operations.py", "Operations", "Running the network",
+     "Phase 8's dashboard for an operations director: twelve months against the twelve before."),
 ]
 
 
@@ -82,8 +84,11 @@ def style() -> None:
     st.html(f"<style>{css}\n{root}</style>")
 
 
-def chapter(n: int, kicker: str, title: str, standfirst: str) -> None:
+def chapter(n: int, kicker: str, title: str, standfirst: str, wide: bool = False) -> None:
     style()
+    if wide:
+        # A dashboard's tables and charts need more than the paper's reading width.
+        st.html('<style>[data-testid="stMainBlockContainer"] { max-width: 1320px; }</style>')
     st.html(f'<div class="lh-kicker">Chapter {n:02d} · {esc(kicker)}</div>'
             f'<h1 class="lh-title">{esc(title)}</h1>'
             f'<div class="lh-stand">{standfirst}</div>')
@@ -99,9 +104,12 @@ def section():
     return st.columns([3, 1], gap="large")
 
 
-def numbers(items: list[tuple[str, str]]) -> None:
+def numbers(items: list[tuple[str, ...]]) -> None:
+    """Key numbers: (value, label), or (value, label, a comparison line)."""
     cells = "".join(f'<div class="lh-num"><div class="v">{esc(v)}</div>'
-                    f'<div class="l">{esc(label)}</div></div>' for v, label in items)
+                    f'<div class="l">{esc(label)}</div>'
+                    + "".join(f'<div class="s">{esc(x)}</div>' for x in rest) + "</div>"
+                    for v, label, *rest in items)
     st.html(f'<div class="lh-nums">{cells}</div>')
 
 
@@ -113,15 +121,38 @@ def finding(text: str) -> None:
     st.html(f'<div class="lh-finding">{text}</div>')
 
 
-def notes(*items: str) -> None:
-    """Margin notes: the caveats and decision numbers, numbered."""
+def notes(*items: str, across: bool = False) -> None:
+    """Margin notes: the caveats and decision numbers, numbered. `across` lays
+    them out side by side under a full-width block instead of down a margin."""
     body = "".join(f"<p><b>{i}</b>{item}</p>" for i, item in enumerate(items, 1))
-    st.html(f'<div class="lh-notes">{body}</div>')
+    st.html(f'<div class="lh-notes{" across" if across else ""}">{body}</div>')
 
 
 def figure(chart: alt.Chart, number: str, caption: str) -> None:
     st.altair_chart(themed(chart), width="stretch", theme=None)
     st.html(f'<div class="lh-cap"><b>Fig. {esc(number)}</b>&ensp;{caption}</div>')
+
+
+def table(df: pd.DataFrame, formats: dict[str, str] | None = None, missing: str = "–") -> None:
+    """A table in the paper's style: rules, not a grid; numbers right-aligned in
+    the mono face. `missing` is what an empty cell reads, e.g. "hidden"."""
+    formats = formats or {}
+    numeric = {c for c in df.columns
+               if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])}
+
+    def cell(column, value) -> str:
+        if pd.isna(value):
+            return f'<td class="x">{esc(missing)}</td>'
+        if column not in numeric:
+            return f"<td>{esc(value)}</td>"
+        spec = formats.get(column, ",.0f" if float(value).is_integer() else ",")
+        return f'<td class="r">{esc(format(value, spec))}</td>'
+
+    head = "".join(f'<th{" class=r" if c in numeric else ""}>{esc(c)}</th>' for c in df.columns)
+    rows = "".join("<tr>" + "".join(cell(c, v) for c, v in row.items()) + "</tr>"
+                   for _, row in df.iterrows())
+    st.html(f'<div class="lh-table"><table><thead><tr>{head}</tr></thead>'
+            f"<tbody>{rows}</tbody></table></div>")
 
 
 def themed(chart: alt.Chart) -> alt.Chart:
@@ -153,10 +184,13 @@ def strip(current: int) -> None:
         f'stroke="{p["accent"] if n <= current else p["rule"]}" stroke-width="3"/>'
         for n, x in zip(range(1, len(CHAPTERS) + 1), xs, strict=True))
     done = xs[current - 1]
-    st.html(f'<div class="lh-strip"><svg viewBox="0 0 {xs[-1] + 10} 22" width="100%" height="22" '
-            f'aria-hidden="true"><line x1="10" y1="11" x2="{xs[-1]}" y2="11" stroke="{p["rule"]}" '
-            f'stroke-width="4"/><line x1="10" y1="11" x2="{done}" y2="11" stroke="{p["accent"]}" '
-            f'stroke-width="4"/>{dots}</svg></div>')
+    svg = (f'<svg viewBox="0 0 {xs[-1] + 10} 22" width="100%" height="22" aria-hidden="true" '
+           'preserveAspectRatio="xMinYMid meet">'
+           f'<line x1="10" y1="11" x2="{xs[-1]}" y2="11" stroke="{p["rule"]}" stroke-width="4"/>'
+           f'<line x1="10" y1="11" x2="{done}" y2="11" stroke="{p["accent"]}" stroke-width="4"/>'
+           f"{dots}</svg>")
+    # st.html's sanitiser drops SVG; markdown with raw HTML keeps it.
+    st.markdown(f'<div class="lh-strip">{svg}</div>', unsafe_allow_html=True)
 
 
 def pager(current: int) -> None:
@@ -177,5 +211,6 @@ def colophon() -> None:
     st.html('<div class="lh-colophon">Synthetic data from Synthea: no real patients. '
             'Aggregates only, and any group of 1&ndash;10 stays or readmissions is hidden, with '
             'whatever would give it back by subtraction. Built on Databricks Free Edition. '
-            '<a href="https://github.com/tanaygattani8/Healthcare_Lakehouse">Source and the '
-            'decision log (D1&ndash;D75)</a>.</div>')
+            # A new tab: GitHub refuses to load inside streamlit.app's frame.
+            '<a href="https://github.com/tanaygattani8/Healthcare_Lakehouse" target="_blank" '
+            'rel="noopener">The source and the decision log</a>.</div>')

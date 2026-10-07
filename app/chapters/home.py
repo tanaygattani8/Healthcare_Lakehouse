@@ -18,6 +18,7 @@ results = ui.snapshot("model_results")
 verdict = results.query("population == 'all' and scorer == 'model' and patients == 'all'")
 history = ui.snapshot("retrain_history")
 live = history[history["mode"] == "live"].iloc[-1]
+ops = ui.snapshot("ops_kpi").iloc[0]
 
 # Station: (chapter, x, y, label anchor, line colour, number on the map).
 STATIONS = [
@@ -29,6 +30,7 @@ STATIONS = [
      f"{100 * totals.readmitted / totals.index_stays:.2f}% come back"),
     (5, 640, 112, "below", "gold", verdict["model_verdict"].iloc[0]),
     (6, 740, 46, "above", "gold", f"live v{live.new_version or live.champion_version}"),
+    (7, 400, 172, "below", "gold", f"{ops.stays:,.0f} stays · ${ops.cost_per_stay / 1e3:.1f}K"),
 ]
 LABELS = {n: (path.split("_", 1)[1][:-3], short) for n, path, short, _, _ in ui.CHAPTERS}
 
@@ -54,6 +56,7 @@ track = (
     f'<path d="M290 112 Q 310 46 360 46 L 395 46" stroke="{p["silver"]}" stroke-width="5" '
     f'fill="none"/>'
     f'<path d="M500 112 Q 515 172 545 172" stroke="{p["gold"]}" stroke-width="5" fill="none"/>'
+    f'<path d="M360 112 Q 372 172 400 172" stroke="{p["gold"]}" stroke-width="5" fill="none"/>'
     f'<path d="M680 112 Q 700 46 740 46" stroke="{p["gold"]}" stroke-width="5" fill="none"/>'
 )
 ends = (
@@ -66,8 +69,9 @@ ends = (
 )
 svg = (f'<svg class="lh-map" viewBox="0 0 800 225" width="100%" role="img" '
        f'aria-label="The pipeline as a map: Synthea to bronze and silver, a branch to '
-       f'de-identification, gold, then care gaps, the readmission story, the model and the '
-       f'retraining loop" font-family="Inter, sans-serif">{track}{ends}'
+       f'de-identification, gold, a branch to the operations dashboard, then care gaps, the '
+       f'readmission story, the model and the retraining loop" '
+       f'font-family="Inter, sans-serif">{track}{ends}'
        f'{"".join(station(*s) for s in STATIONS)}</svg>')
 
 toc = "".join(

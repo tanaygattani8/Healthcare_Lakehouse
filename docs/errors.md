@@ -1792,3 +1792,42 @@ stack was not running.)
 That is one short line to paste. Anything longer than a few lines goes
 through a file.
 
+
+### E65 — the chapter strip was never on the page {#e65}
+```
+document.querySelector('.lh-strip').innerHTML  ->  ""
+```
+
+**Cause.** `ui.strip()` drew its SVG through `st.html`, whose sanitiser drops
+SVG, the same trap D76 found for the map. The empty div kept its margins, so
+every chapter opened with a gap where the line should be. The D76 browser
+checks looked for errors and overflow, not for the strip.
+
+**Fix.** `st.markdown(..., unsafe_allow_html=True)`, with
+`preserveAspectRatio="xMinYMid meet"` so the line sits left.
+
+### E66 — faceted charts clip on a phone {#e66}
+At 375px, chapter 4's three small-multiple figures and the first draft of
+Fig. 7.1 ran past the screen edge (674px wide), so the right of each axis,
+and the last four years of visits, were cut off. No page scrolled sideways,
+so the overflow check passed.
+
+**Cause.** A Vega-Lite facet has a fixed width (560 and 640px); Streamlit
+cannot stretch it.
+
+**Fix.** One chart per row, each `width="stretch"` with
+`autosize: fit-x`, a fixed x domain and a fixed y-label gutter
+(`minExtent` = `maxExtent`) so the rows still share one axis. Only the last
+row draws it.
+
+### E67 — a layered chart with one axis turned off renders at height 0 {#e67}
+```
+TypeError: Cannot read properties of undefined (reading 'forEach')
+    at e.parseAxesAndHeaders
+```
+
+**Cause.** In E66's fix, the whisker layer had `axis=None` and the line and
+dot layers on the same x field kept the default axis. Vega-Lite's axis merge
+fails on the mix, and the chart draws nothing.
+
+**Fix.** Give every layer the same `axis` value.

@@ -2891,3 +2891,62 @@ research paper, a clinical lab report, a pipeline map):
 **Not done.** No page for the gates (phase 7: nothing aggregate to
 publish) or the operations dashboard (phase 8: behind the workspace login).
 `pyyaml` stays in `app/requirements.txt` though the app no longer imports it.
+
+### D77 — the operations dashboard joins the app, and a spacing pass
+
+**Why.** Phase 8's dashboard (D74) is the most analyst-facing piece of the
+project, and the public app left it out: it sits behind the workspace login,
+so a reader saw only a README screenshot. Showing it is what a pitch needs.
+
+**What changed.**
+- **Chapter 07, "Running the network",** a spur off Gold on the map. Five
+  tiles against the prior twelve months, three findings and three
+  recommendations, visits by type month by month, length of stay and cost
+  by quarter, and the payer and hospital tables. It is wider than the paper
+  chapters (1320px), because tables and charts need the room.
+- **Its numbers are the dashboard's own SQL.** `publish_snapshot.ops_queries`
+  reads each dataset from `dashboards/operations.lvdash.json` and runs it with
+  every filter at "All". The app cannot disagree with the dashboard's
+  default view, and `shown()` and the payer table's secondary suppression
+  (E61) run in one place. Five new snapshots: `ops_kpi`, `ops_visits`,
+  `ops_stays`, `ops_payers`, `ops_hospitals`.
+- **Hospital and insurer names are replaced before saving.** Synthea takes
+  them from real Massachusetts hospitals and real insurers; synthetic costs
+  beside a real name read as a claim about it. Hospitals become "Hospital A,
+  B, …" by stays, commercial insurers "Commercial payer 1, 2, …"; Medicare,
+  Medicaid, Dual Eligible and No insurance keep theirs (programmes, not
+  companies). `check_only_categories` refuses any other name.
+- **What the publish refuses** (`publish_ops`, seven tests): a shown count of
+  1-10; any hidden visit or stay cell in the trends, which the twelve-month
+  tiles would give back by subtraction; exactly one hidden payer, or hidden
+  payers or left-out hospitals adding up to 1-10 against the stays tile.
+- **The findings are written by the page** from the snapshot, so a new
+  publish rewrites them; a finding whose number is hidden is left out.
+- **Left out of the dashboard:** the "share of network" tile (always 100
+  with no filter), the network-gap table (all zeros with no filter), the
+  care-gap table (chapter 3 has it), and the filters. Filtering a public
+  page means publishing every combination and proving no two of them give a
+  hidden count back; the live dashboard is safe because each query is
+  suppressed on the group the viewer picked.
+- **Visits by type are one small chart per type,** sharing the month axis,
+  each on its own scale. The dashboard stacks seven types in seven colours;
+  the app has two validated chart colours.
+
+**The spacing pass** (ui-ux-pro-max's checks, then each page at desktop and
+phone width):
+- the ten stock `st.dataframe` grids became `ui.table()`: rules, not a grid,
+  numbers right-aligned in the mono face, an empty cell named (`hidden` on
+  chapter 7);
+- key numbers are a grid that shares out the row, with an optional
+  comparison line under each;
+- margin notes are set smaller and tighter; `ui.notes(across=True)` lays them
+  side by side under a full-width block;
+- the "you are here" strip renders at last (E65), and the small-multiple
+  charts no longer clip on a phone (E66, E67);
+- the footer's GitHub link opens a new tab (GitHub refuses to load inside
+  streamlit.app's frame), and the map's ignored `url_path="map"` is gone.
+
+**Not done.** The README's dashboard screenshot still shows the real
+hospital and insurer names, so a reader can match "Hospital A" to a real
+name by its numbers. It needs a retake with the names cropped, or replacing
+with the app's chapter.
