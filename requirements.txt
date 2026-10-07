@@ -9,9 +9,9 @@ scikit-learn==1.6.1
 # connector and serverless are both on numpy 1.26 (E55).
 numpy==1.26.4
 scipy==1.14.1
-# unpinned: databricks-sql-connector constrains the range. We only need
-# *some* pyarrow so pandas can read/write parquet.
-pyarrow
+# databricks-sql-connector constrains the range; pinned to what the app
+# deploys (app/requirements.txt), which tests/test_requirements_agree.py checks.
+pyarrow==16.1.0
 python-dotenv==1.0.1
 pyyaml==6.0.3
 pytest==8.3.3
