@@ -767,3 +767,51 @@ after checking `databricks pipelines list-updates <id>` yourself.
 8. **Sandbox check, then live**: fingerprints and aliases unchanged; the
    live run (`as_of` 2026-07-15) promoted v5 to `champion` and rescored.
    The results are in D75.
+
+## Entry point 8 — the public app (Streamlit Community Cloud)
+
+**Invoked as:** `.venv/Scripts/streamlit.exe run app/streamlit_app.py` locally (port 8501),
+or by Streamlit Community Cloud from `main`, which installs `app/requirements.txt`.
+**Reads:** `snapshots/*.parquet` only, and `.streamlit/config.toml` from the repo root.
+**Writes:** nothing.
+
+```
+app/streamlit_app.py            set_page_config(wide), then the router
+└── st.navigation(position="top")      pages from ui.CHAPTERS, url paths from file names
+    ├── chapters/home.py        /map (default)
+    │     ├── ui.style()        app/style.css + the palette for st.context.theme (light|dark)
+    │     ├── station numbers   bronze_counts, deid_kanon, gold_care_gap, story_totals,
+    │     │                     model_results, retrain_history
+    │     ├── map SVG           st.markdown(unsafe_allow_html): st.html would strip the SVG
+    │     └── chapter list      links to /data … /promise
+    └── chapters/c1_data.py … c6_promise.py
+          ├── ui.chapter(n, …)  kicker, title, standfirst, ui.strip(n) "you are here"
+          ├── for each section: main, side = ui.section()      st.columns([3, 1])
+          │     ├── main: ui.numbers · ui.stamp · ui.figure(Altair → ui.themed) · ui.finding
+          │     └── side: ui.notes(…)           caveats and D-numbers, numbered
+          ├── ui.method(…)      st.expander: the full tables
+          └── ui.pager(n)       previous / next chapter, then the colophon
+```
+
+Every chart goes through `ui.themed()` (fonts, axis colours, no grid) and is drawn
+with `theme=None`, so Streamlit's own chart theme never overrides it. After
+changing `ui.py`, restart the server: Streamlit reruns a changed page but keeps
+an imported module cached. `style.css` is read on every run.
+
+### Cycle 21 — 2026-10-06 · the app redesign
+
+1. **Directions** mocked up in the browser with real numbers: a research paper, a
+   lab report, a pipeline map. Chosen: the map for the home page, the paper for
+   the chapters, the "layer metals" palette.
+2. **Data**: `publish_snapshot` gains `RETRAIN_HISTORY` and
+   `publish_retrain_history` (tests first), then one publish. Only
+   `retrain_history.parquet` is new; `eval_scores` gains phase 8's dev runs;
+   `story_levels` came back reordered and was restored.
+3. **Kit and theme**: `.streamlit/config.toml`, `app/ui.py`, `app/style.css`;
+   chart palettes checked with the dataviz validator in both modes.
+4. **Pages**: `app/pages/` becomes `app/chapters/` (home, c1-c6), behind
+   `st.navigation`. Streamlit 1.39.0 → 1.65.0, Altair 5.5.0 pinned.
+5. **Checked in the browser**: every page in dark and light, and at 375 px.
+   Fixed on the way: the SVG stripped by `st.html`, stale phase 2 numbers, a
+   recall chart with only the base rate left in it, per-signal axes, charts
+   pulled down to zero, labels colliding at phone width.

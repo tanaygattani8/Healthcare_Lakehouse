@@ -7,7 +7,9 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 9 complete: an Airflow DAG that retrains on drift,
+**Status:** The public app was redesigned (D76): the home page is the pipeline drawn
+as a map, and each stop is a chapter written like a research paper. Phase 9
+complete: an Airflow DAG that retrains on drift,
 replayed year by year over 2021-2026 before it was allowed to move the live
 model. It judges the review workload, not accuracy, and it found its own
 limits (D75). Phase 8 added an AI/BI operations dashboard for a hospital
@@ -24,6 +26,28 @@ pointed the model's way, on 17 readmissions, too few to judge. The phase's
 real product is the platform around the model: experiments, a registry,
 batch scoring and a drift monitor, which says the 2020-2026 patients are
 older and sicker than the ones the model learned from.
+
+## The app
+
+The home page is the lakehouse drawn as a transit map: Synthea, bronze,
+silver, gold, then the story, the model and the retraining loop. Each station
+carries the one number its chapter answers and opens that chapter. The six
+chapters read like a research paper: a standfirst, the key numbers, numbered
+figures, a verdict stamped on the page, and every caveat and decision number
+in the margin. Bronze, silver and gold are the map's lines and the pages'
+accents, in light or dark to match the reader (D76).
+
+| Chapter | What it answers |
+|---|---|
+| 01 The data arrives | how much landed, and what failed a rule (kept, not dropped) |
+| 02 Hiding the patients | how well four programs hid private details, and who could still be picked out |
+| 03 Care gaps | three quality measures, read as the generator's rules |
+| 04 Who comes back | the 30-day readmission story, in five sections (earlier sections call it app page 4) |
+| 05 Can a model beat one rule? | the model's verdict and its drift (app page 5) |
+| 06 The model keeps its promise | phase 9's retraining loop, replayed and then run live |
+
+It reads only the published snapshots, never the warehouse. Every number on
+it is computed from them, and any group of 1-10 is hidden.
 
 ## What phase 9 produced
 
