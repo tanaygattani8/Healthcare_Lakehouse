@@ -7,7 +7,9 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** The public app was redesigned (D76): the home page is the pipeline drawn
+**Status:** Phase 10 complete: `main` only changes through a pull request
+whose `lint`, `bundle` and `dags` checks are green, admins included (D78).
+The public app was redesigned (D76): the home page is the pipeline drawn
 as a map, and each stop is a chapter written like a research paper. Chapter 7
 puts phase 8's operations dashboard on the public page for the first time (D77). Phase 9
 complete: an Airflow DAG that retrains on drift,
@@ -52,6 +54,22 @@ It reads only the published snapshots, never the warehouse. Every number on
 it is computed from them, and any group of 1-10 is hidden. Chapter 7's numbers
 come from the dashboard's own SQL, and its hospital and insurer names are made
 up before publishing: Synthea takes them from real ones (D77).
+
+## What phase 10 produced
+
+**CI became a gate.** Until now every phase was merged locally and pushed,
+so CI reported after the code had landed. Branch protection on `main` now
+requires three checks, admins included, and squash merges only (D78):
+- `lint`: ruff and the tests, which gained a pin test (the app's requirement
+  pins must match the project's) and a growth test in place of a flaky 5 s
+  timer;
+- `bundle`: `databricks bundle validate` for dev and prod;
+- `dags`: builds the Airflow image and loads both DAGs in it, so a broken
+  Airflow import fails CI instead of the next run.
+
+**Seen holding:** a pull request with a broken DAG import passed ruff and
+the tests, failed `dags`, and was blocked; a direct push to `main` was
+refused. The app on Streamlit only ever deploys a commit that passed.
 
 ## What phase 9 produced
 
@@ -473,6 +491,16 @@ It refuses to start unless the pipeline's last update passed its gates,
 and refuses a year out of order. `--env-file ../.env` is how Airflow gets the Databricks credentials —
 there is no second credential file.
 
+### Merging
+
+`main` is protected (D78); every change goes through a pull request:
+
+```bash
+git push -u origin phase-N
+gh pr create --fill
+gh pr merge --squash        # refused until lint, bundle and dags are green
+```
+
 ## Architecture notes
 
 - **Bronze does nothing.** No casting, no cleaning, no dedup. Every column
@@ -495,7 +523,7 @@ there is none.
 | Constraint | Production would do | What this project does |
 |---|---|---|
 | One workspace per account | Separate dev and prod workspaces | Separate catalogs, `healthcare_dev` and `healthcare`, in one workspace |
-| Service principals for CI | Service principal with scoped permissions | A PAT in GitHub Actions secrets. OIDC is the upgrade path |
+| Service principals for CI | Service principal with scoped permissions | A PAT in GitHub Actions secrets, used by the gate's `bundle` job on every pull request. OIDC is the upgrade path |
 | Bundle `mode: production` | Enabled, enforcing run-as and deployment rules | Omitted — its `run_as` requirements cannot be met by a single-user Free Edition account |
 | One active pipeline per type | A pipeline per medallion layer | One pipeline containing all layers |
 | Quota shuts down compute daily | Autoscaling production clusters | Dev tier of ~1,000 patients, plus a second batch of ~11,000 generated on the laptop as CSV only (D65); large runs are manual and deliberate |
