@@ -102,16 +102,36 @@ def level_row(signal: str, level: str, side: Side, rest: Side) -> dict:
                   "rest_rate": rest.rate, "rest_low": rest_low, "rest_high": rest_high}
 
 
+def hidden_sum(rows: list[dict]) -> Side | None:
+    """What a signal's hidden levels hold together: the total, read off any
+    shown level and its rest, minus every shown level. None if nothing is
+    shown, since then there is nothing to subtract."""
+    shown = [row for row in rows if not row["suppressed"]]
+    if not shown:
+        return None
+    stays = shown[0]["index_stays"] + shown[0]["rest_stays"]
+    readmitted = shown[0]["readmitted"] + shown[0]["rest_readmitted"]
+    return Side(stays - sum(row["index_stays"] for row in shown),
+                readmitted - sum(row["readmitted"] for row in shown), 0)
+
+
 def complete_suppression(rows: list[dict]) -> list[dict]:
-    """A signal's levels add up to the published totals, so one hidden level
-    is found by subtraction. Where a signal has exactly one, hide its
-    smallest published level too, preferring one with readmissions (D66)."""
+    """A signal's levels add up to the published totals, so its hidden levels
+    are found together by subtraction. Hide more levels until they hold 0 or
+    11+ stays and readmissions between them, and never just one (D66, D79).
+    Each extra is the catch-all "other" if shown, as the level that means
+    least, then the smallest, preferring one with readmissions."""
     out = list(rows)
     for signal in {row["signal"] for row in out}:
         mine = [i for i, row in enumerate(out) if row["signal"] == signal]
-        shown = [i for i in mine if not out[i]["suppressed"]]
-        if len(mine) - len(shown) == 1 and shown:
-            pick = min(shown, key=lambda i: (out[i]["readmitted"] == 0,
+        while True:
+            shown = [i for i in mine if not out[i]["suppressed"]]
+            left = hidden_sum([out[i] for i in mine])
+            if left is None or not (len(mine) - len(shown) == 1 or
+                                    (left.stays and _small(left))):
+                break
+            pick = min(shown, key=lambda i: (out[i]["level"] != "other",
+                                             out[i]["readmitted"] == 0,
                                              out[i]["readmitted"], out[i]["index_stays"]))
             out[pick] = {k: out[pick][k] for k in
                          ("signal", "chapter", "level", "at_discharge", "separates")} | {

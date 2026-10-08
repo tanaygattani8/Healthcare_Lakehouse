@@ -725,7 +725,7 @@ trigger retrain  (as_of, mode)       params validated at trigger: a bad date mak
 │     ├── 1. order guard   rt.order_problem: replay one year at a time from 2021;
 │     │                    live needs six replays; no (as_of, mode) twice
 │     ├── 2. champion      live: @champion · replay: newest replay alias, else @champion
-│     ├── 3. trigger       rt.flag_rate on the 12 months before as_of vs rt.budget (21.8%)
+│     ├── 3. trigger       rt.flag_rate on the 12 months before as_of vs rt.budget (24.9% since D80)
 │     │                    rt.shifted_features stored, triggers nothing
 │     ├── 4. challengers   new cutoff: same model, rm.alert_threshold on the 12 months before
 │     │                    retrain: rm.build_pipeline(champion's kind) on every labelled stay
@@ -767,6 +767,10 @@ after checking `databricks pipelines list-updates <id>` yourself.
 8. **Sandbox check, then live**: fingerprints and aliases unchanged; the
    live run (`as_of` 2026-07-15) promoted v5 to `champion` and rescored.
    The results are in D75.
+9. **Rerun (D80)** on the 2000-2019 champion v6: `train_readmission`,
+   `score_readmission`, `drift_readmission`; `ml.retrain_history` renamed
+   `ml.retrain_history_d75`; six replays and the live run by
+   `run_notebook.sh`; live `champion` is v9; rescored.
 
 ## Entry point 8 — the public app (Streamlit Community Cloud)
 
@@ -845,7 +849,7 @@ an imported module cached. `style.css` is read on every run.
 ```
 pull_request -> .github/workflows/pr.yml (one concurrency group per PR)
 ├── lint     pip install -r requirements.txt -> ruff check . -> pytest -q
-├── bundle   databricks bundle validate -t dev, -t prod
+├── bundle   databricks bundle validate -t dev (the only target since D79)
 └── dags     docker build orchestration -> ci_check_dags.py in the image
              (DagBag over dags/: no import errors, ids == {medallion, retrain})
       | all three green, branch up to date (branch protection, admins included)

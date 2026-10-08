@@ -19,11 +19,14 @@ from scripts import drift
 from scripts import readmission_model as rm
 from scripts.readmission_story import wilson
 
-POPULATION = "all"            # spec §0: no_bypass rests on 17 readmissions and stays at v2
+POPULATION = "all"            # spec §0: no_bypass rests on 17 readmissions; never retrained
 FIRST_REPLAY = dt.date(2021, 1, 1)
 LAST_REPLAY = dt.date(2026, 1, 1)
 REPLAYS = LAST_REPLAY.year - FIRST_REPLAY.year + 1
 LABEL_DAYS = 30               # a stay's 30-day outcome is known 30 days after discharge
+# A retrain fits on this many years before its check window: phase 6's window
+# (2000-2019, D80) rolled forward, so no cursor trains on stays back to 1915.
+TRAIN_YEARS = int(rm.PROD_FROM[:4]) - int(rm.TRAIN_FROM[:4])
 
 
 def add_years(day: dt.date, n: int) -> dt.date:
@@ -50,11 +53,14 @@ def labelled(df: pd.DataFrame, as_of: dt.date) -> pd.Series:
     return pd.to_datetime(df["discharge_day"]) <= pd.Timestamp(labels_known_by(as_of))
 
 
-def trained_on(df: pd.DataFrame, admit_before, discharged_by) -> pd.Series:
-    """The stays a model with these two tags trained on. v2 has no tags; its
-    training is split()'s: admit_before PROD_FROM, discharged_by TRAIN_UNTIL."""
-    return ((pd.to_datetime(df["admit_day"]) < pd.Timestamp(admit_before))
-            & (pd.to_datetime(df["discharge_day"]) <= pd.Timestamp(discharged_by)))
+def trained_on(df: pd.DataFrame, admit_before, discharged_by, admit_from=None) -> pd.Series:
+    """The stays a model with these tags trained on. v2 has no tags; its
+    training is split()'s before D80: admit_before PROD_FROM, discharged_by
+    TRAIN_UNTIL, no admit_from. Versions since D80 carry train_admit_from."""
+    admit = pd.to_datetime(df["admit_day"])
+    picked = (admit < pd.Timestamp(admit_before)) & (
+        pd.to_datetime(df["discharge_day"]) <= pd.Timestamp(discharged_by))
+    return picked & (admit >= pd.Timestamp(admit_from)) if admit_from else picked
 
 
 def budget(signals: pd.DataFrame) -> float:

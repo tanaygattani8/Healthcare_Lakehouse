@@ -128,6 +128,26 @@ def test_the_complement_prefers_a_level_with_readmissions():
         "0-17": False, "45-64": False, "65-79": True, "80+": True}
 
 
+def test_hidden_levels_that_sum_to_1_to_10_take_the_other_level_with_them():
+    # The shape the audit found (D79): four admit reasons hidden, and
+    # 140 - 71 - 59 left exactly 10 readmissions to subtraction. "other" is
+    # hidden next, not the bypass level the story quotes.
+    rows = complete_suppression(_rows("admit_reason_group", [
+        ("other", 4238, 71), ("cabg", 606, 59), ("a", 2000, 4), ("b", 1900, 3),
+        ("c", 1000, 2), ("d", 980, 1)], total=Side(10724, 140, 127)))
+    assert {r["level"]: r["suppressed"] for r in rows} == {
+        "other": True, "cabg": False, "a": True, "b": True, "c": True, "d": True}
+
+
+def test_hidden_levels_holding_11_or_more_need_no_more():
+    # 80+ and 18-44 are hidden; together they hold 1,600 stays and 13
+    # readmissions, which subtraction may give back.
+    rows = _rows("age_band", [("0-17", 800, 0), ("45-64", 4000, 120), ("65-79", 3000, 45),
+                              ("80+", 1595, 8), ("18-44", 5, 5)], total=Side(9400, 178, 160))
+    assert [r["suppressed"] for r in complete_suppression(rows)] == [
+        False, False, False, True, True]
+
+
 def test_two_hidden_levels_need_no_more():
     rows = _rows("is_planned", [("false", 7000, 150), ("true", 2400, 6)])
     assert all(r["suppressed"] for r in rows)

@@ -52,18 +52,15 @@ jobs:
       # principal with scoped permissions is what production uses, and OIDC is
       # the upgrade path. Noted here because this file is where whoever
       # inherits it will care.
-      - name: Validate both targets
+      - name: Validate the bundle
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: |
           databricks bundle validate -t dev
-          databricks bundle validate -t prod
 
-      # Deliberately absent: `bundle deploy -t prod`. It would create a second
-      # pipeline on a tier that permits one, pointed at an empty landing volume,
-      # spending the quota whose exhaustion locks compute for the rest of the
-      # day. See the degradations table in README.md.
+      # Deliberately absent: `bundle deploy`. A deploy updates the workspace's
+      # one pipeline; that stays a deliberate step on the laptop.
 
   # The Airflow DAGs, loaded by the same image the laptop runs
   # (orchestration/Dockerfile). ruff only lints them as Python; this catches a

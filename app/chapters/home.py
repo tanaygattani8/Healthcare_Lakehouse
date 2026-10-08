@@ -1,6 +1,7 @@
 """The home page: the lakehouse as a transit map. Each station is a chapter,
 carries its headline number from the snapshots, and opens its page."""
 
+import pandas as pd
 import streamlit as st
 import ui
 
@@ -18,6 +19,8 @@ results = ui.snapshot("model_results")
 verdict = results.query("population == 'all' and scorer == 'model' and patients == 'all'")
 history = ui.snapshot("retrain_history")
 live = history[history["mode"] == "live"].iloc[-1]
+# NaN is truthy, so `or` would print "vnan" when the live run promotes nothing.
+live_version = live.new_version if pd.notna(live.new_version) else live.champion_version
 ops = ui.snapshot("ops_kpi").iloc[0]
 
 # Station: (chapter, x, y, label anchor, line colour, number on the map).
@@ -28,8 +31,8 @@ STATIONS = [
     (3, 470, 112, "below", "gold", f"{len(ui.snapshot('gold_care_gap'))} measures"),
     (4, 545, 172, "below", "gold",
      f"{100 * totals.readmitted / totals.index_stays:.2f}% come back"),
-    (5, 640, 112, "below", "gold", verdict["model_verdict"].iloc[0]),
-    (6, 740, 46, "above", "gold", f"live v{live.new_version or live.champion_version}"),
+    (5, 640, 112, "below", "gold", f"{verdict['cutoff_verdict'].iloc[0]} the rule"),
+    (6, 740, 46, "above", "gold", f"live v{live_version}"),
     (7, 400, 172, "below", "gold", f"{ops.stays:,.0f} stays · ${ops.cost_per_stay / 1e3:.1f}K"),
 ]
 LABELS = {n: (path.split("_", 1)[1][:-3], short) for n, path, short, _, _ in ui.CHAPTERS}

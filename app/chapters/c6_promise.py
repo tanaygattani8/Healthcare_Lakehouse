@@ -1,5 +1,5 @@
-"""Chapter 6: the retraining loop (phase 9, D75), replayed one year at a time
-and then run once for real. Rates and verdicts only."""
+"""Chapter 6: the retraining loop (phase 9, D75; rerun in D80), replayed one
+year at a time and then run once for real. Rates and verdicts only."""
 
 import altair as alt
 import pandas as pd
@@ -30,7 +30,7 @@ with main:
     first = h.iloc[0]
     ui.numbers([(f"{100 * budget:.1f}%", "the workload budget: stays flagged for review"),
                 (f"{100 * first.champion_rate:.1f}%", f"flagged in {first.as_of.year - 1} by "
-                                                       "the model trained to 2019"),
+                                                       "the model trained on 2000-2019"),
                 (f"{100 * live.cutoff_rate:.1f}%", f"flagged after the live run's new cutoff, "
                                                    f"now model v{live.new_version}")])
     ui.stamp(f"Live · {live.outcome} → v{live.new_version}")
@@ -72,16 +72,23 @@ with side:
 ui.heading("What six years showed", "Three findings, and three limits")
 main, side = ui.section()
 with main:
-    ui.finding("<b>The drift began before 2020.</b> A cutoff set on 2019 alone already fitted "
-               "2020, so the first run promoted. 2020 continued a trend; it did not break one.")
-    ui.finding("<b>Moving the cutoff was always enough.</b> Every time both challengers were "
-               "judged, the retrained model did no better than the old model with a new cutoff.")
-    ui.finding("<b>The loop found its own limits.</b> After the fix the rate crept up about 1.5 "
-               "points a year, which an interval of about ±4.5 points cannot see; when it fired "
-               "again in 2026, a cutoff learned a year earlier was a year behind.")
+    ui.finding("<b>2020 broke the pattern.</b> A cutoff learned on 2019 did not fit 2020: "
+               "the first run fired and both challengers failed. 2020 is also when COVID-19 "
+               "arrives as an admit reason, in 7% of stays. On the first run, trained back to "
+               "1915, 2020 looked like a trend continuing (D75); that was the old window.")
+    ui.finding("<b>A new cutoff was enough whenever anything was.</b> Each time a fix passed, "
+               "both had passed and the simpler one won; in 2020 both failed alike. A retrained "
+               "model never caught what a new cutoff missed.")
+    ui.finding("<b>Each fix lasts about two years.</b> The flag rate creeps up a point or so a "
+               "year, and the trigger, about ±4.5 points wide at 350 stays, fires on the third "
+               "year. It fired in the 2024 and 2026 runs, and again live.")
 with side:
-    ui.notes("Every decision rests on about 350 stays. The 2026 replay failed and the live run, "
-             "six months later, passed: the window's edge moved the verdict.",
+    ui.notes("Every decision rests on about 350 stays.",
+             "The live run starts from the live champion, not from the sandbox's: the replays' "
+             "promotions never touch the live model. <i>D75</i>",
+             "First run on a model trained back to 1915, kept as ml.retrain_history_d75; "
+             "rerun on the 2000-2019 model, and retraining now uses the 20 years before each "
+             "run. <i>D80</i>",
              "Not built, and handed on: a cutoff set on recent months, and a trend test across "
              "runs.")
 

@@ -1,9 +1,10 @@
 # Databricks notebook source
 # Phase 6 training (spec §4). For each population: choose between logistic
-# regression and gradient boosting by patient-grouped CV on stays up to 2019,
-# refit the winner, judge it against the rule on 2020-2026 at the same number
-# of alerts, log it all to MLflow, register the champion in Unity Catalog,
-# and write ml.model_results.
+# regression and gradient boosting by patient-grouped CV on stays from 2000 to
+# 2019 (rm.TRAIN_FROM, D80), refit the winner, judge it against the rule on
+# 2020-2026 twice: at the same number of alerts (D71), and at its deployed
+# cutoff against the rule thinned to as many (D80). Log it all to MLflow,
+# register the champion in Unity Catalog, and write ml.model_results.
 
 # COMMAND ----------
 
@@ -82,7 +83,8 @@ for population in rm.POPULATIONS:
     rows = rm.evaluate(y_prod, prod["patient_id"], returning, k,
                        {"rule": (rm.rule_score(prod), rm.rule_probability(train, prod)),
                         "model": (model_score, model_score)},
-                       base_rate=float(y_train.mean()), name=population)
+                       base_rate=float(y_train.mean()), name=population,
+                       threshold=threshold)
     model_all = next(r for r in rows if r["scorer"] == "model" and r["patients"] == "all")
     # Spec §3.3: catches that are themselves 30-day returns (decision P-g).
     self_returns = (prod["days_since_last_discharge"] <= 30).to_numpy()
@@ -100,7 +102,8 @@ for population in rm.POPULATIONS:
                            "train_stays": len(train), "gap_stays": len(gap),
                            "prod_stays": len(prod)})
         mlflow.log_metrics(metrics(model_all, "recall", "avg_precision", "brier",
-                                   "diff_low", "diff_mid", "diff_high")
+                                   "diff_low", "diff_mid", "diff_high",
+                                   "cut_low", "cut_mid", "cut_high")
                            | {"cv_avg_precision": best["cv_ap"],
                               "alert_threshold": threshold,
                               "caught_self_returns": caught_self_returns})
@@ -114,10 +117,12 @@ for population in rm.POPULATIONS:
                                         registered_model_name=name)
     version = info.registered_model_version
     client.set_registered_model_alias(name, "champion", version)
-    beats = {"beats": "true", "no better": "false",
-             "too few to judge": "too_few"}[model_all["model_verdict"]]
-    for key, value in {"beats_rule": beats, "alert_threshold": threshold,
+    tag = {"beats": "true", "no better": "false", "too few to judge": "too_few"}
+    for key, value in {"beats_rule": tag[model_all["model_verdict"]],
+                       "beats_rule_at_cutoff": tag[model_all["cutoff_verdict"]],
+                       "alert_threshold": threshold, "train_admit_from": rm.TRAIN_FROM,
                        "train_cutoff": rm.TRAIN_UNTIL, "population": population,
+                       "kind": best["kind"], **best["params"],
                        "prod_stays": len(prod)}.items():
         client.set_model_version_tag(name, version, key, str(value))
 
@@ -133,6 +138,8 @@ for population in rm.POPULATIONS:
         "cv_ap": round(best["cv_ap"], 4), "version": str(version),
         "verdict": model_all["model_verdict"],
         "diff": [round(model_all[c], 3) for c in ("diff_low", "diff_mid", "diff_high")],
+        "cutoff_verdict": model_all["cutoff_verdict"],
+        "cut": [round(model_all[c], 3) for c in ("cut_low", "cut_mid", "cut_high")],
         "caught_self_returns": caught_self_returns, "alert_threshold": round(threshold, 5)}
 
 table = pd.DataFrame(results).reindex(columns=rm.RESULT_COLUMNS)

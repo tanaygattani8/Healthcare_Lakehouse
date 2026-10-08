@@ -44,9 +44,9 @@ CHAPTERS = [
     (4, "chapters/c4_story.py", "Who comes back", "Who comes back",
      "140 of 10,724 stays, 1.31%, and most of them one bypass-surgery rule."),
     (5, "chapters/c5_model.py", "The model", "Can a model beat one rule?",
-     "+12.2 points caught, interval -3.0 to +29.0: no better."),
+     "At its cutoff, +27.4 points caught, interval +14.1 to +41.8: it beats the rule."),
     (6, "chapters/c6_promise.py", "The promise", "The model keeps its promise",
-     "Six years replayed: moving the cutoff was always enough, until it lagged."),
+     "Six years replayed: 2020 broke the cutoff, and each new one lasts about two years."),
     (7, "chapters/c7_operations.py", "Operations", "Running the network",
      "Phase 8's dashboard for an operations director: twelve months against the twelve before."),
 ]

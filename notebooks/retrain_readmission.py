@@ -83,6 +83,7 @@ kind, params = rt.settings(champion.tags if "kind" in champion.tags
                            else client.get_run(champion.run_id).data.params)
 admit_before = champion.tags.get("train_admit_before", rm.PROD_FROM)
 discharged_by = champion.tags.get("labels_known_by", rm.TRAIN_UNTIL)
+admit_from = champion.tags.get("train_admit_from")   # absent before D80: no lower bound
 
 signals = rm.population(spark.table(f"{C}.gold.readmission_signals").toPandas(),
                         rt.POPULATION)
@@ -90,7 +91,7 @@ target = rt.budget(signals)
 w = rt.windows(as_of)
 check = signals[rt.admitted(signals, *w["check"])]
 cutoff = signals[rt.admitted(signals, *w["cutoff"])]
-trained = signals[rt.trained_on(signals, admit_before, discharged_by)]
+trained = signals[rt.trained_on(signals, admit_before, discharged_by, admit_from)]
 assert len(check) > 0 and len(cutoff) > 0, "an empty window"
 assert check.index.intersection(trained.index).empty, "the champion trained on the check window"
 
@@ -120,10 +121,12 @@ if triggered:
     cut = rt.flag_rate(champion_check, cut_threshold)
     cut_passes = rt.on_budget(cut, target)
 
-    # 4b. Retrain: the champion's settings on every stay admitted before the
-    # check window whose label is known by as_of.
+    # 4b. Retrain: the champion's settings on the TRAIN_YEARS of stays admitted
+    # before the check window whose label is known by as_of (D80).
     new_admit_before, new_discharged_by = str(w["check"][0]), str(rt.labels_known_by(as_of))
-    train = signals[rt.trained_on(signals, new_admit_before, new_discharged_by)]
+    new_admit_from = str(rt.add_years(w["check"][0], -rt.TRAIN_YEARS))
+    train = signals[rt.trained_on(signals, new_admit_before, new_discharged_by,
+                                  new_admit_from)]
     x_train = rm.build_features(train, rt.POPULATION)
     retrained = rm.build_pipeline(kind, params, rt.POPULATION).fit(
         x_train, train[rm.TARGET].astype(int))
@@ -174,6 +177,7 @@ if new_version:
     is_cut = outcome == "new cutoff"
     tags = {"alert_threshold": cut_threshold if is_cut else re_threshold,
             "train_admit_before": admit_before if is_cut else new_admit_before,
+            "train_admit_from": admit_from if is_cut else new_admit_from,
             "labels_known_by": discharged_by if is_cut else new_discharged_by,
             "source_version": champion.version, "as_of": as_of, "mode": mode,
             "promoted_by": "retrain_on_drift", "population": rt.POPULATION,
@@ -182,7 +186,8 @@ if new_version:
     tags["prod_stays"] = int((pd.to_datetime(signals["admit_day"])
                               >= pd.Timestamp(rt.scored_from(tags))).sum())
     for key, value in tags.items():
-        client.set_model_version_tag(NAME, new_version, key, str(value))
+        if value is not None:   # a pre-D80 champion has no train_admit_from; "None" is not a date
+            client.set_model_version_tag(NAME, new_version, key, str(value))
     row["alias"] = f"replay_{as_of.year}" if mode == "replay" else "champion"
     client.set_registered_model_alias(NAME, row["alias"], new_version)
 row["new_version"] = new_version

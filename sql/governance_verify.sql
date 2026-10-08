@@ -22,7 +22,10 @@ SELECT 'revoked' AS state, SSN, FIRST, CITY, ZIP, birth_date, latitude
 FROM healthcare_dev.silver.patient
 WHERE patient_id = (SELECT min(patient_id) FROM healthcare_dev.silver.patient);
 
-INSERT INTO healthcare_dev.ops.phi_clearance VALUES (current_user(), 'full');
+-- Three columns since the row filter added scope_state. The old two-value
+-- insert failed here and left the user uncleared (D79).
+INSERT INTO healthcare_dev.ops.phi_clearance (user_email, level, scope_state)
+VALUES (current_user(), 'full', '*');
 
 SELECT 'restored' AS state, SSN, FIRST, CITY, ZIP, birth_date, latitude
 FROM healthcare_dev.silver.patient

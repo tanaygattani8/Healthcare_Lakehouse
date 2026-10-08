@@ -7,7 +7,7 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** Phase 10 complete: `main` only changes through a pull request
+**Status:** An independent audit challenged every decision; its three findings a reader could check (two unmasked PHI copies, a hidden count of 10 recoverable by subtraction, a prod target never deployed) are fixed (D79). Its fourth changed the ML verdict: trained from 2000 rather than 1915, and judged at the cutoff it would run at, the model beats the rule it was first said to match (D80). Phase 10 complete: `main` only changes through a pull request
 whose `lint`, `bundle` and `dags` checks are green, admins included (D78).
 The public app was redesigned (D76): the home page is the pipeline drawn
 as a map, and each stop is a chapter written like a research paper. Chapter 7
@@ -21,14 +21,15 @@ hidden by construction (D74). Phase 7 made gold's invariants stop the
 pipeline when they break; on their first runs they caught two silent bugs.
 
 Phase 6 asked: can a model beat one rule ("heart disease or stroke on the
-admit day") at spotting 30-day readmissions? Trained on stays
-up to 2019 and judged on 2020-2026, a gradient-boosted model caught more
-readmissions than the rule at the same number of alerts, but not enough to
-rule out luck: **no better**. Without the bypass-surgery population it
-pointed the model's way, on 17 readmissions, too few to judge. The phase's
-real product is the platform around the model: experiments, a registry,
-batch scoring and a drift monitor, which says the 2020-2026 patients are
-older and sicker than the ones the model learned from.
+admit day") at spotting 30-day readmissions? Trained on stays from 2000 to
+2019 and judged on 2020-2026 where it would run, at its own cutoff against
+the rule cut to as many alerts, a logistic regression caught 27.4 points
+more of the readmissions (95% interval +14.1 to +41.8): it **beats the
+rule**. It was first published as "no better": that was judged at the
+rule's own alert count, which no deployment uses, on a model trained on
+stays back to 1915. An audit found both, and D80 fixed them. Without the
+bypass-surgery population, 17 readmissions are too few to judge. Around the
+model: experiments, a registry, batch scoring and a drift monitor.
 
 ## The app
 
@@ -63,7 +64,7 @@ requires three checks, admins included, and squash merges only (D78):
 - `lint`: ruff and the tests, which gained a pin test (the app's requirement
   pins must match the project's) and a growth test in place of a flaky 5 s
   timer;
-- `bundle`: `databricks bundle validate` for dev and prod;
+- `bundle`: `databricks bundle validate` (dev and prod then; dev only since D79);
 - `dags`: builds the Airflow image and loads both DAGs in it, so a broken
   Airflow import fails CI instead of the next run.
 
@@ -82,10 +83,10 @@ sandbox, then one live run applied the same rule for real (D75).
 **What it judges is workload, not accuracy.** With about 5 readmissions a
 year, no one-year window can show that one model ranks better than
 another. What drift did measurably is make nurses review more charts: the
-cutoff was set to flag 21.8% of stays, and on 2020 patients it flagged
-31.6%.
+cutoff was set to flag 24.9% of stays, and on 2020 patients it flagged
+35.9%.
 - **The trigger:** when the champion's flag rate on the last 12 months
-  leaves the 21.8% budget (95% interval).
+  leaves the 24.9% budget (95% interval).
 - **Two challengers:** a new cutoff on the same model, and a retrained
   model.
 - **The winner:** the simpler one that brings the rate back to budget and
@@ -93,23 +94,28 @@ cutoff was set to flag 21.8% of stays, and on 2020 patients it flagged
 
 | Cursor (checks) | Champion's flag rate (95%) | New cutoff | Retrain | Outcome |
 |---|---|---|---|---|
-| 2021 (2020) | 31.6% (27.4-36.1) | 23.0% pass | 23.7% pass | **new cutoff promoted** |
-| 2022 (2021) | 21.2% (17.6-25.2) | | | no trigger |
-| 2023 (2022) | 23.3% (19.1-28.2) | | | no trigger |
-| 2024 (2023) | 25.2% (20.9-30.1) | | | no trigger |
-| 2025 (2024) | 26.1% (21.8-30.9) | | | no trigger |
-| 2026 (2025) | 27.7% (23.3-32.6) | 26.6% fail | 29.4% fail | **none passed** |
-| live, 2026-07-15 | 33.5% (28.9-38.5) | 20.3% pass | 23.0% pass | **new cutoff → live `champion`** |
+| 2021 (2020) | 35.9% (31.6-40.6) | 31.3% fail | 31.3% fail | **none passed** |
+| 2022 (2021) | 28.2% (24.2-32.5) | | | no trigger |
+| 2023 (2022) | 29.4% (24.7-34.5) | | | no trigger |
+| 2024 (2023) | 29.9% (25.3-35.0) | 24.3% pass | 23.5% pass | **new cutoff promoted** |
+| 2025 (2024) | 29.2% (24.7-34.1) | | | no trigger |
+| 2026 (2025) | 30.5% (25.9-35.5) | 28.0% pass | 27.7% pass | **new cutoff promoted** |
+| live, 2026-07-15 | 35.7% (31.0-40.7) | 25.7% pass | 23.5% pass | **new cutoff → live `champion` v9** |
+
+Rerun in D80 on the 2000-2019 model; the first run, on a model trained back
+to 1915, is kept as `ml.retrain_history_d75` and found the opposite about
+2020. The retrain challenger now fits on the 20 years before each run.
 
 **What it found:**
-- **The drift began before 2020.** A cutoff set on 2019 alone already
-  fitted 2020, which answers what phase 6 left open.
-- **Moving the cutoff was always enough.** Retraining never did better.
-- **The loop's limits.** After one fix, the rate crept up about 1.5 points
-  a year, which a trigger with a ±4.5-point interval cannot see. When it
-  fired again, a cutoff learned from the year before was a year behind.
-  Every decision rests on about 350 stays, and moving the window by six
-  months moved one verdict across the line.
+- **2020 broke the pattern.** A cutoff learned on 2019 did not fit 2020, and
+  both challengers failed. It is also the year COVID-19 arrives as an admit
+  reason, in 7% of stays.
+- **A new cutoff was enough whenever anything was.** Each time a fix passed,
+  both had passed and the simpler one won. Retraining never caught what a
+  new cutoff missed.
+- **Each fix lasts about two years.** The flag rate creeps up a point or so
+  a year; the trigger, about ±4.5 points wide at 350 stays, fires on the
+  third. Every decision rests on about 350 stays.
 
 **The pieces:**
 - **The DAG** checks that the pipeline's last update passed its gates
@@ -219,11 +225,18 @@ comparison with the rule does.
 
 | | All index stays | Without bypass surgery |
 |---|---|---|
-| Training (to 2019) / production (2020-2026) stays | about 8,200 / 2,451 | about 7,700 / 2,208 |
+| Training (2000-2019) / production (2020-2026) stays | about 5,200 / 2,451 | about 4,800 / 2,208 |
 | Production readmissions | 34 | 17 |
-| Champion, chosen by patient-grouped cross-validation | gradient boosting | logistic regression |
-| Readmissions caught, model minus rule (95%, patients resampled) | +12.2 points (-3.0 to +29.0) | +35.7 points (+7.1 to +64.8) |
-| Verdict | **no better** | **too few to judge** (under 30) |
+| Champion, chosen by patient-grouped cross-validation | logistic regression | gradient boosting |
+| Caught, model minus rule, at the model's cutoff, rule thinned to match (95%) | +27.4 points (+14.1 to +41.8) | +36.1 points (+7.1 to +64.1) |
+| Caught, model minus rule, at the rule's alert count (95%) | +20.5 points (+5.5 to +36.0) | +35.3 points (+5.9 to +63.7) |
+| Verdict | **beats the rule** | **too few to judge** (under 30) |
+
+Published first as **no better** (+12.2, -3.0 to +29.0), at the rule's alert
+count only, from a model trained on stays back to 1915. The rule is yes/no,
+so it cannot move to a review budget; at the budget the model is deployed
+at, the fair baseline is the rule with a random share of its alerts dropped
+(D80).
 
 ![MLflow runs: each population's champion, versions 1 and 2](docs/images/phase6-mlflow-runs.jpg)
 
@@ -239,13 +252,15 @@ counts back.*
   report in `ml.drift_report`. The rules are pure Python with local tests;
   three notebooks run them as serverless jobs.
 - **Ranking is not calibration:** the model's average precision is about
-  twice the rule's, but its Brier score is no better than the base rate's.
-- **Drift:** production patients are older (mean age 41.7 to 52.2) and
-  sicker (heart disease or stroke 21.8% to 35.4% of stays), and COVID-19 arrives
-  as an admit reason training never saw. The model flags 31-36% of stays in
-  every year against about 22% in training. The readmission rate itself did not
-  move measurably. PSI read the heart-disease jump as "stable", so
-  true/false features are judged by their rate instead (D71).
+  four times the base rate's, but its Brier score is no better.
+- **Drift:** on the 2000-2019 window, age and conditions at admission are
+  "watch" (PSI 0.18 and 0.19), down from "shifted" (0.35 and 0.36) when
+  training reached back to 1915. Heart disease or stroke still rises from
+  24.9% to 35.4% of stays, and COVID-19 arrives as an admit reason training
+  never saw. The model flags 28-36% of stays a year against about 25% in
+  training. The readmission rate itself did not move measurably. PSI read
+  the heart-disease jump as "stable", so true/false features are judged by
+  their rate instead (D71).
 - **Getting the registry to work** took MLflow 3.16.1 plus a Files API
   switch (E52), and naming the three types skops may load (E56).
 
@@ -402,6 +417,12 @@ is fabricated and the column comment says so.
 on, so a lost tag silently unmasks a column. **Run it after every full
 refresh.**
 
+**Corrected after an independent audit (D79).** Two copies sat outside the
+masks: `silver.v_patient`, the published view `silver.patient` is built from,
+and the raw `bronze.br_patients`. The view is now temporary and stored nowhere;
+bronze is tagged and masked; and a third check lists any identifier column, in
+any schema, that carries no tag. It failed on both copies before it passed.
+
 ## What phase 2 produced
 
 | | |
@@ -522,7 +543,7 @@ there is none.
 
 | Constraint | Production would do | What this project does |
 |---|---|---|
-| One workspace per account | Separate dev and prod workspaces | Separate catalogs, `healthcare_dev` and `healthcare`, in one workspace |
+| One workspace per account, one pipeline | Separate dev and prod workspaces | One catalog, `healthcare_dev`, and one bundle target. A prod target was validated in CI but never deployed, and the notebooks, SQL and dashboard all named the dev catalog, so it was a claim rather than a split; dropped in D79 |
 | Service principals for CI | Service principal with scoped permissions | A PAT in GitHub Actions secrets, used by the gate's `bundle` job on every pull request. OIDC is the upgrade path |
 | Bundle `mode: production` | Enabled, enforcing run-as and deployment rules | Omitted — its `run_as` requirements cannot be met by a single-user Free Edition account |
 | One active pipeline per type | A pipeline per medallion layer | One pipeline containing all layers |
@@ -530,6 +551,7 @@ there is none.
 | AI/BI dashboards sit behind the workspace login | A published dashboard shared with the business | The dashboard ships as code and is deployed by the bundle; the README carries a screenshot of the default network view |
 | Databricks Apps for internal hosting | An App behind workspace SSO | Streamlit Community Cloud — Apps sit behind workspace auth and stop after 24h |
 | One account, which owns every object | A service principal owns `ops`; analysts get `SELECT` on `silver` and nothing on `ops` | A row in `ops.phi_clearance`. **Separation of duties is impossible here, not merely weak** — there is one principal and it owns everything, so the masks demonstrate a mechanism and enforce nothing against their owner. A second principal is the fix; `REVOKE` is not |
+| One account, so the owner reads everything | Readers are granted a table, never the hidden table that stores it | Lakeflow stores each pipeline table's rows in a `__materialization_mat_…` table beside it. Its owner reads it unmasked and unfiltered; tagging it does not help, because schema mask policies do not reach it (measured, D79) |
 | One state in the dataset | Row filters segregate by region | The filter works and is verified, but with every patient in Massachusetts it can only be all-rows or no-rows |
 | No GPU, and a daily compute cap | The name model runs on GPU inference | It ran 6.5 hours on a laptop CPU after the cap stopped the Databricks job two hours in. The test set was cut to 25 patients so every program could afford it |
 | A daily compute cap | FHIR flattened for every patient | The FHIR export is 12.8 GB; track A ran on the 25 test patients (316 MB). SQL-vs-PySpark timings are one run at 1,148 patients and are not a ranking |

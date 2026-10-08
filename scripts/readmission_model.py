@@ -14,6 +14,11 @@ from sklearn.model_selection import GroupKFold, cross_val_predict, cross_val_sco
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+# First admit day in training. Before it, stays reach back to 1915 and the
+# patients are younger and healthier than 2020's: training "drift" was there
+# on day one. The longest window whose age and condition PSI against
+# production stay under 0.25 (probe_window.py, D80).
+TRAIN_FROM = "2000-01-01"
 TRAIN_UNTIL = "2019-12-01"  # last discharge day in training: every label is known by 2020
 PROD_FROM = "2020-01-01"    # first admit day in production
 TOO_FEW = 30                # production readmissions needed for a verdict
@@ -39,7 +44,8 @@ GRID = {
 # ml.model_results, in order (decision P-c).
 RESULT_COLUMNS = ["population", "patients", "scorer", "model_kind", "model_version",
                   "readmitted", "caught", "missed", "k", "recall", "avg_precision", "brier",
-                  "cv_avg_precision", "diff_low", "diff_mid", "diff_high", "model_verdict"]
+                  "cv_avg_precision", "diff_low", "diff_mid", "diff_high", "model_verdict",
+                  "cut_low", "cut_mid", "cut_high", "cutoff_verdict"]
 
 
 def population(df: pd.DataFrame, name: str) -> pd.DataFrame:
@@ -47,15 +53,18 @@ def population(df: pd.DataFrame, name: str) -> pd.DataFrame:
     return df if name == "all" else df[~df["had_bypass_surgery"].astype(bool)]
 
 
-def split(df: pd.DataFrame, train_until: str = TRAIN_UNTIL,
-          prod_from: str = PROD_FROM) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def split(df: pd.DataFrame, train_until: str = TRAIN_UNTIL, prod_from: str = PROD_FROM,
+          train_from: str | None = TRAIN_FROM) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Training, gap, production (spec §2). The gap's 30-day labels would
-    look past the cutoff, so it is used for nothing."""
+    look past the cutoff, so it is used for nothing. Stays admitted before
+    train_from belong to none of the three (D80)."""
     admit = pd.to_datetime(df["admit_day"])
     discharge = pd.to_datetime(df["discharge_day"])
     before = admit < pd.Timestamp(prod_from)
+    if train_from is not None:
+        before &= admit >= pd.Timestamp(train_from)
     train = before & (discharge <= pd.Timestamp(train_until))
-    return df[train], df[before & ~train], df[~before]
+    return df[train], df[before & ~train], df[admit >= pd.Timestamp(prod_from)]
 
 
 def features_for(name: str) -> list[str]:
@@ -175,6 +184,31 @@ def bootstrap_difference(y, model, rule, groups, n: int = 1000,
     return float(low), float(mid), float(high)
 
 
+def thinned_rule_recall(y, rule, flags: int) -> float:
+    """The rule's expected recall when cut to `flags` alerts at random. It is
+    yes/no, so it cannot move to a budget; keeping a random share of its
+    flags keeps that share of its catches, on average (D80)."""
+    y, rule = np.asarray(y, bool), np.asarray(rule, bool)
+    if not y.any() or not rule.any():
+        return 0.0
+    return float((rule & y).sum() / y.sum() * min(1.0, flags / rule.sum()))
+
+
+def bootstrap_at_cutoff(y, model, rule, groups, threshold: float, n: int = 1000,
+                        seed: int = 0) -> tuple[float, float, float]:
+    """95% interval of recall(model at its deployed cutoff) - recall(the rule
+    thinned to as many alerts), resampling patients. bootstrap_difference
+    judges both at the rule's own count, which no deployment uses (D80)."""
+    y, a, b = np.asarray(y, bool), np.asarray(model, float), np.asarray(rule, bool)
+    diffs = []
+    for idx in patient_resamples(groups, n, seed):
+        yy, flagged = y[idx], a[idx] >= threshold
+        model_recall = (flagged & yy).sum() / yy.sum() if yy.any() else 0.0
+        diffs.append(model_recall - thinned_rule_recall(yy, b[idx], int(flagged.sum())))
+    low, mid, high = np.percentile(diffs, [2.5, 50, 97.5])
+    return float(low), float(mid), float(high)
+
+
 def verdict(low: float, readmitted: int) -> str:
     if readmitted < TOO_FEW:
         return "too few to judge"
@@ -182,11 +216,13 @@ def verdict(low: float, readmitted: int) -> str:
 
 
 def evaluate(y, groups, returning, k: int, scorers: dict, base_rate: float,
-             name: str) -> list[dict]:
+             name: str, threshold: float | None = None) -> list[dict]:
     """Rows for ml.model_results (spec §4.3): the base rate, then each
     scorer, for all, new and returning patients. scorers maps a name to
     (score, probability) and must hold 'rule', the comparison. Flags are the
-    top k over all of production; a breakdown counts within its patients."""
+    top k over all of production; a breakdown counts within its patients.
+    With a threshold, each model is also judged where it is deployed: at
+    that cutoff, against the rule thinned to as many alerts (cut_*, D80)."""
     y = np.asarray(y, bool)
     groups = np.asarray(groups)
     returning = np.asarray(returning, bool)
@@ -214,6 +250,10 @@ def evaluate(y, groups, returning, k: int, scorers: dict, base_rate: float,
                 low, mid, high = bootstrap_difference(y, score, rule, groups)
                 row |= {"diff_low": low, "diff_mid": mid, "diff_high": high,
                         "model_verdict": verdict(low, readmitted)}
+                if threshold is not None:
+                    low, mid, high = bootstrap_at_cutoff(y, score, rule, groups, threshold)
+                    row |= {"cut_low": low, "cut_mid": mid, "cut_high": high,
+                            "cutoff_verdict": verdict(low, readmitted)}
             elif scorer != "rule":
                 # No bootstrap for a breakdown (decision P-j).
                 row["model_verdict"] = "too few to judge" if readmitted < TOO_FEW else None

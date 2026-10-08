@@ -36,8 +36,15 @@ def test_v2s_training_tags_select_exactly_phase_6s_training_stays():
     df = _days(("2019-11-20", "2019-12-01"), ("2019-11-25", "2019-12-02"),
                ("2019-12-31", "2020-01-02"), ("2020-01-01", "2020-01-03"))
     train, _, _ = rm.split(df)
-    picked = df[rt.trained_on(df, rm.PROD_FROM, rm.TRAIN_UNTIL)]
+    picked = df[rt.trained_on(df, rm.PROD_FROM, rm.TRAIN_UNTIL, rm.TRAIN_FROM)]
     assert list(picked["stay_no"]) == list(train["stay_no"]) == [0]
+
+
+def test_a_lower_bound_leaves_out_older_stays_and_none_means_no_bound():
+    df = _days(("1999-12-31", "2000-01-02"), ("2000-01-01", "2000-01-03"))
+    assert list(rt.trained_on(df, rm.PROD_FROM, rm.TRAIN_UNTIL, "2000-01-01")) == [False, True]
+    assert list(rt.trained_on(df, rm.PROD_FROM, rm.TRAIN_UNTIL)) == [True, True]
+    assert rt.TRAIN_YEARS == 20
 
 
 def test_the_budget_ignores_production_stays():

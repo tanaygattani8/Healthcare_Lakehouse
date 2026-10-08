@@ -15,18 +15,6 @@
 ALTER TABLE healthcare_dev.bronze.br_notes
   ALTER COLUMN _source_file SET TAGS ('phi_category' = 'name');
 
--- The 3a policies are attached to silver and ops. bronze had none, so the tag
--- above would otherwise label a column as private and leave it in the clear —
--- which governance_check.sql is built to catch.
-CREATE OR REPLACE POLICY mask_phi_text
-  ON SCHEMA healthcare_dev.bronze
-  COMMENT 'Redact names and identifier numbers for uncleared readers.'
-  COLUMN MASK healthcare_dev.ops.mask_text
-  TO `account users`
-  FOR TABLES
-  MATCH COLUMNS has_tag_value('phi_category', 'name')
-             OR has_tag_value('phi_category', 'geography')
-             OR has_tag_value('phi_category', 'ssn')
-             OR has_tag_value('phi_category', 'license')
-             OR has_tag_value('phi_category', 'other_id') AS c
-  ON COLUMN c;
+-- The bronze policy that covers this tag was first created here. It now
+-- lives in governance_bronze.sql, which widened it to every tag value when
+-- br_patients was tagged (D79). Run that file after this one.

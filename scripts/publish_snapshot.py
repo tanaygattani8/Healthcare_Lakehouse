@@ -16,6 +16,7 @@ from scripts.readmission_story import (
     SUPPRESS_BELOW,
     Side,
     complete_suppression,
+    hidden_sum,
     level_row,
     shortlist,
     verdict,
@@ -110,7 +111,8 @@ MODEL_RESULTS = "SELECT * FROM {catalog}.ml.model_results"
 MODEL_DRIFT = ("SELECT drift_check, period, subject, value, low, high, status "
                "FROM {catalog}.ml.drift_report "
                "WHERE run_at = (SELECT max(run_at) FROM {catalog}.ml.drift_report)")
-MODEL_TEXT = {"population", "patients", "scorer", "model_kind", "model_version", "model_verdict"}
+MODEL_TEXT = {"population", "patients", "scorer", "model_kind", "model_version", "model_verdict",
+              "cutoff_verdict"}
 # Phase 9: the retraining loop's decisions. ml.retrain_history holds rates and
 # verdicts only (D75); the stay count per window is in the hundreds.
 RETRAIN_HISTORY = (
@@ -164,6 +166,7 @@ ALLOWED_TEXT = {
     "scorer": {"base_rate", "rule", "model"},
     "model_kind": set(GRID),
     "model_verdict": {"beats", "no better", "too few to judge"},
+    "cutoff_verdict": {"beats", "no better", "too few to judge"},
     "drift_check": {"feature", "score", "flag_rate", "readmission_rate"},
     "period": {"training", "2020-2026"} | {str(year) for year in range(2020, 2027)},
     "subject": set(FEATURES) | set(POPULATIONS),
@@ -211,7 +214,8 @@ def fetch_story_levels(cur, catalog: str) -> pd.DataFrame:
 
 def check_small_cells(levels: pd.DataFrame) -> None:
     """Stop before writing if a published level breaks D66: a shown count of
-    1-10, or a signal with exactly one hidden level."""
+    1-10, a signal with exactly one hidden level, or hidden levels that hold
+    1-10 stays or readmissions between them (D79)."""
     shown = levels[~levels["suppressed"]]
     for column in ("index_stays", "readmitted", "rest_stays", "rest_readmitted"):
         if shown[column].between(1, SUPPRESS_BELOW - 1).any():
@@ -219,6 +223,12 @@ def check_small_cells(levels: pd.DataFrame) -> None:
     hidden = levels.groupby("signal")["suppressed"].sum()
     if (hidden == 1).any():
         raise SystemExit("refusing to publish: a signal has exactly one hidden level")
+    for signal, rows in levels.groupby("signal"):
+        left = hidden_sum(rows.to_dict("records"))
+        if left and (0 < left.stays < SUPPRESS_BELOW
+                     or 0 < left.readmitted < SUPPRESS_BELOW):
+            raise SystemExit(f"refusing to publish: the hidden levels of {signal} "
+                             "hold 1-10 between them")
 
 
 def _numbers(df: pd.DataFrame, text: set[str]) -> pd.DataFrame:
