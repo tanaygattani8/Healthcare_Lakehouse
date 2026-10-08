@@ -193,6 +193,15 @@ def test_evaluate_rows():
     assert {r["model_verdict"] for r in rows
             if r["scorer"] == "model" and r["patients"] != "all"} == {"too few to judge"}
     assert set().union(*rows) <= set(rm.RESULT_COLUMNS)
+    assert "cut_low" not in model_all                       # no threshold, no cutoff verdict
+    rows = rm.evaluate(y, groups, returning, int(rule.sum()),
+                       {"rule": (rule, rule * 0.3), "model": (model, model)},
+                       base_rate=0.1, name="all", threshold=0.75)
+    model_all = next(r for r in rows if r["scorer"] == "model" and r["patients"] == "all")
+    assert model_all["cut_low"] <= model_all["cut_mid"] <= model_all["cut_high"]
+    assert model_all["cutoff_verdict"] in {"beats", "no better", "too few to judge"}
+    assert set().union(*rows) <= set(rm.RESULT_COLUMNS)
+
 
 def test_patient_resamples_draws_what_the_bootstrap_always_drew():
     # The loop bootstrap_difference had before phase 9, written out: the
@@ -207,3 +216,37 @@ def test_patient_resamples_draws_what_the_bootstrap_always_drew():
     new = list(rm.patient_resamples(groups, 20, seed=3))
     assert len(new) == 20
     assert all(np.array_equal(a, b) for a, b in zip(old, new, strict=True))
+
+
+def test_a_thinned_rule_keeps_its_share_of_catches():
+    y = np.array([1, 1, 0, 0, 1, 0, 0, 0], bool)
+    rule = np.array([1, 1, 1, 1, 0, 0, 0, 0], bool)   # 4 flags, 2 of 3 caught
+    assert rm.thinned_rule_recall(y, rule, 4) == pytest.approx(2 / 3)
+    assert rm.thinned_rule_recall(y, rule, 2) == pytest.approx(1 / 3)
+    # More flags than the rule has cannot be thinned up: the rule as it is.
+    assert rm.thinned_rule_recall(y, rule, 8) == pytest.approx(2 / 3)
+    assert rm.thinned_rule_recall(np.zeros(8, bool), rule, 2) == 0.0
+
+
+def test_at_the_cutoff_a_model_equal_to_the_rule_ties_with_it():
+    rng = np.random.default_rng(1)
+    rule = rng.random(600) < 0.35
+    y = rng.random(600) < np.where(rule, 0.06, 0.01)
+    groups = np.arange(600) // 3
+    # Scoring every rule flag 1 and the rest 0 flags all of them at 0.5: no thinning.
+    low, mid, high = rm.bootstrap_at_cutoff(y, rule.astype(float), rule, groups, 0.5, n=200)
+    assert low == mid == high == 0.0
+    # A perfect score at a cutoff that flags as many as the rule beats it.
+    perfect = y.astype(float)
+    low, _, _ = rm.bootstrap_at_cutoff(y, perfect, rule, groups, 0.5, n=200)
+    assert low > 0
+
+
+def test_a_lower_bound_drops_old_stays_from_every_part():
+    df = _signals()
+    train, gap, prod = rm.split(df, train_from="2018-01-01")
+    full_train, full_gap, full_prod = rm.split(df)
+    assert (pd.to_datetime(train["admit_day"]) >= "2018-01-01").all()
+    assert len(train) < len(full_train) and len(prod) == len(full_prod)
+    assert len(train) + len(gap) == (pd.to_datetime(df["admit_day"])
+                                     .between("2018-01-01", "2019-12-31")).sum()

@@ -3023,3 +3023,163 @@ it, because Airflow parses every file in `dags/`.
 
 **Emergency.** Turn `enforce_admins` off in Settings, merge, turn it back
 on. Each use is an errors.md entry.
+
+### D79 — the audit: three findings fixed, one platform limit found
+
+**Why.** After phase 10 an independent reviewer, given the code but not this
+log, challenged every decision (2026-10-07). Thirty-two challenges; argued
+against this log, most were answered or narrowed. Three were defects a
+reader of the repo could find alone, and these are fixed here.
+
+**1. Two unmasked copies of the patient table.**
+- `silver.v_patient`, the typed view `silver.patient` is built from, was a
+  *published* materialized view: SSN, names, address, coordinates and birth
+  dates, untagged, beside the masked table. `bronze.br_patients` held the
+  same identifiers as raw strings, also untagged. patient.sql said "all
+  identifying columns live here and nowhere else". An uncleared read
+  returned real values from both. On a one-account workspace nobody could
+  exploit it (D49); the claim was still false.
+- `v_patient` is now a `TEMPORARY VIEW`: computed inside the update,
+  stored nowhere. **PRIVATE was tried first and is not enough.** The
+  pipeline stores a private view anyway, renamed
+  `bronze.__<pipeline id>_v_patient`, with its own backing table.
+- Removing a view from the pipeline does not drop it. The stale
+  `silver.v_patient`, the private copy and their two backing tables were
+  dropped by hand.
+- `sql/governance_bronze.sql` tags br_patients' 19 identifier columns with
+  the silver values. Every bronze column is a string, so one bronze policy
+  covering all eight values masks to `'***'`; it replaces the five-value
+  policy from governance_notes.sql. A selective refresh of `silver.patient`
+  then read 12,580 patients, none masked, no blank birth dates: the
+  pipeline still reads bronze as a cleared user.
+- **CHECK 3** in governance_check.sql lists every column named like one of
+  the identifiers, in any schema, that carries no tag. CHECKs 1 and 2 only
+  see columns someone tagged. It was seen failing on the real catalog first
+  (v_patient and br_patients, 19 columns each), then passing.
+
+**The limit it found.** Every pipeline table keeps its rows in a MANAGED
+`__materialization_mat_<pipeline>_<name>_<n>` table in the same schema. Read
+by an uncleared owner, silver.patient's returns every row with real SSNs:
+past the masks and past the row filter. Tagging it is permitted, and was
+tried: it still returned real values, while br_patients, tagged the same
+minute, was masked. Schema policies do not reach backing tables. The tags
+were removed again, so no tag claims a mask that does not apply, and CHECK 3
+skips backing tables with that reason written beside it. Another principal
+would be granted the table, not its backing table; here the owner reads
+everything (D49). The README's degradation row says so.
+
+**2. The story published a 10 by subtraction.** Four admit reasons were
+hidden, and 140 − 71 ("other") − 59 (bypass history) = 10 readmissions
+among them; the colophon says any group of 1-10 is hidden "with whatever
+would give it back by subtraction". D66's rule handled exactly one hidden
+level. Now a signal hides more levels until the hidden ones hold 0 or 11+
+stays and readmissions between them (`complete_suppression`), and
+`check_small_cells` refuses to publish otherwise. The extra level is the
+catch-all "other" first, as the level that means least; the rule's old
+choice, the smallest, would have hidden the bypass level chapter 4 quotes.
+Only that row of `story_levels` changed. A count of 10 is already in git
+history; on synthetic data, rewriting history for it is not worth it.
+
+**3. The prod target was a claim.** CI validated `-t prod`; it was never
+deployed (a fixed rule), and the notebooks, SQL and dashboard all name
+`healthcare_dev`. Dropped from databricks.yml, CI and the catalog setup.
+The empty `healthcare` catalog still exists in the workspace; nothing
+reads it.
+
+**Error.** E69: `governance_verify.sql` restored clearance with two values
+after the row filter made it three columns. A probe copied it and left the
+only account uncleared for under a minute. Fixed in both.
+
+**Not done** (the reviewer's other findings, for a later choice): the
+training window starts in 1915 and the model's verdict is judged at a
+cutoff it does not deploy at; the snapshot guards are per path rather than
+one deny-by-default role map; `setup-cli@main` is unpinned and no test
+parses the SQL; the clearance check D47 asks for before a gold build is
+not a task in the medallion DAG.
+
+### D80 — the model, re-judged: trained from 2000, compared where it runs
+
+**Why.** The audit after phase 10 (D79) found two things wrong with phase
+6's verdict, and the code agreed with it.
+- **Training reached back to 1915.** `split()` had an upper bound only.
+  Production patients (2020-2026) were older and sicker than a century of
+  training stays, so drift was there on day one: age PSI 0.35, and the
+  2020 flag rate 32% against a 21.8% budget. D71 said per-year training
+  rates were never computed; D75's "drift began before 2020" was partly
+  this.
+- **The verdict was judged where nothing runs.** "No better" compared model
+  and rule at the rule's own alert count, 35.4% of production stays. The
+  model is deployed at a cutoff set to flag the rule's *training* rate.
+  The rule is yes/no, so it cannot move to that budget, which is why it
+  was compared at its own count. The fair baseline at the deployed budget
+  is the rule with a random share of its alerts dropped: its expected
+  recall is its own times the share kept (`thinned_rule_recall`).
+
+**The probe** (`notebooks/probe_window.py`, read-only: nothing logged or
+registered). Every window, "all" population; production 2,451 stays, 34
+readmissions; model minus rule in points of recall, 95% interval:
+
+| Training from | Stays / readmissions | Age PSI | Budget → production flag rate | At the rule's count | At the deployed cutoff |
+|---|---|---|---|---|---|
+| 1915 (phase 6) | 8,240 / 104 | 0.35 | 21.8% → 32.9% | -3.0 to +29.0 | +2.4 to +32.8 |
+| **2000** | 5,180 / 71 | 0.18 | 24.9% → 31.9% | +5.5 to +36.0 | +14.1 to +41.8 |
+| 2005 | 4,121 / 62 | 0.13 | 26.3% → 32.4% | +3.6 to +27.5 | +3.0 to +28.3 |
+| 2010 | 2,859 / 41 | 0.07 | 28.6% → 31.4% | 0.0 to +28.6 | +5.5 to +34.5 |
+
+**The choice, and how it was made.** The verdicts were seen before the
+window was chosen, so the window is not chosen by them. The rule: the
+longest window whose age and condition PSI against production are both
+below 0.25 ("shifted"). That is 2000. Each window's verdict at the deployed
+cutoff is "beats", the 1915 one included, so the change of verdict does not
+rest on the choice. Cross-validated average precision falls as the window
+shortens (0.142, 0.123, 0.109, 0.087): less history, fewer readmissions to
+learn from.
+
+**What changed.**
+- `rm.TRAIN_FROM = "2000-01-01"`, the default of `split()`, so training,
+  scoring, drift and phase 9's budget all use it.
+- `evaluate()` also judges at the deployed cutoff: `cut_low/mid/high` and
+  `cutoff_verdict` in `ml.model_results`, beside D71's `diff_*` and
+  `model_verdict`. Versions carry `beats_rule_at_cutoff` and
+  `train_admit_from` tags.
+- Retraining fits on the 20 years before each run (`rt.TRAIN_YEARS`,
+  `trained_on(..., admit_from)`), so no cursor trains on 1915 again.
+- Chapter 5 headlines the deployed comparison and shows both; chapter 6's
+  findings are rewritten from the new replay.
+
+**Results.**
+- Phase 6: "all" champion v6, logistic regression (C = 1), cut-off 0.00642;
+  **beats** at the deployed cutoff (+27.4, +14.1 to +41.8) and at the
+  rule's count (+20.5, +5.5 to +36.0). "No bypass" v3, gradient boosting:
+  too few to judge (17 readmissions). Brier equals the base rate's;
+  average precision is four times it.
+- Drift: age and conditions "watch" (PSI 0.18, 0.19), no longer
+  "shifted". The yes/no conditions and admit reason still are.
+- Phase 9, rerun: `ml.retrain_history` was renamed
+  `ml.retrain_history_d75` and the stale `replay_2021` alias removed, so
+  the order guard allowed a clean replay. Budget 24.9%.
+
+| Cursor (checks) | Champion | Flag rate (95%) | New cutoff | Retrain | Outcome |
+|---|---|---|---|---|---|
+| 2021 (2020) | v6 | 35.9% (31.6-40.6) | 31.3% fail | 31.3% fail | none passed |
+| 2022 (2021) | v6 | 28.2% (24.2-32.5) | | | no trigger |
+| 2023 (2022) | v6 | 29.4% (24.7-34.5) | | | no trigger |
+| 2024 (2023) | v6 | 29.9% (25.3-35.0) | 24.3% pass | 23.5% pass | new cutoff → v7 |
+| 2025 (2024) | v7 | 29.2% (24.7-34.1) | | | no trigger |
+| 2026 (2025) | v7 | 30.5% (25.9-35.5) | 28.0% pass | 27.7% pass | new cutoff → v8 |
+| live, 2026-07-15 | v6 | 35.7% (31.0-40.7) | 25.7% pass | 23.5% pass | new cutoff → **v9, live** |
+
+  The replays and the live run were submitted with `run_notebook.sh`, not
+  through the Airflow DAG: the same notebook, without the DAG's gate task.
+  The pipeline's last update had completed. Rescored with v9 afterwards.
+
+**What the rerun overturned in D75.** D75 found 2020 continued a trend (a
+2019 cutoff fitted it). On the 2000-2019 model, 2020 is a break: neither
+challenger could bring it back to budget. D75's version was an artefact of
+the century-long window. Still true: a retrained model never caught what a
+new cutoff missed. New: each fix lasts about two years before the trigger
+fires again.
+
+**Not done.** The reviewer's remaining findings stay as D79 lists them. The
+thinned rule is a weak baseline on purpose (the same rule, fewer alerts);
+a rule that ranks its own alerts, by age say, would be a stronger one.

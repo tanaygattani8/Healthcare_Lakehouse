@@ -1,5 +1,5 @@
 """Chapter 5: can a model beat one rule? The comparison and the drift, from
-the model snapshots (phase 6). A recall on 1-10 caught or missed is hidden."""
+the model snapshots (phase 6, D80). A recall on 1-10 caught or missed is hidden."""
 
 import altair as alt
 import pandas as pd
@@ -32,45 +32,66 @@ models = results[(results["scorer"] == "model") & (results["patients"] == "all")
 top = models[models["population"] == "all"].iloc[0]
 
 ui.chapter(5, "The readmission model", "Can a model beat one rule?",
-           "Trained on stays up to 2019 and judged on 2020-2026, a model was asked to beat one "
-           "rule, \"heart disease or stroke on the admit day\", at the same number of alerts. "
-           "It caught more readmissions, but not enough to rule out luck.")
+           "Trained on stays from 2000 to 2019 and judged on 2020-2026, a model was asked to "
+           "beat one rule, \"heart disease or stroke on the admit day\". Judged where it would "
+           "run, at its own cutoff against the rule cut to as many alerts, it caught "
+           f"{100 * top.cut_mid:.1f} points more of the readmissions, "
+           + {"beats": "and the whole interval clears zero: it beats the rule.",
+              "no better": "but not enough to rule out luck.",
+              "too few to judge": "on too few readmissions to judge."}[top.cutoff_verdict])
+
+COMPARISONS = {"cut": "at its cutoff", "diff": "at the rule's count"}
+SHORT = {"all": "All stays", "no_bypass": "No bypass"}
+gap = pd.concat([models.assign(comparison=label, low=models[f"{key}_low"],
+                               mid=models[f"{key}_mid"], high=models[f"{key}_high"],
+                               verdict=models["cutoff_verdict" if key == "cut"
+                                              else "model_verdict"])
+                 for key, label in COMPARISONS.items()])
+gap = gap.sort_values("population", kind="stable")
+gap["row"] = gap["population"].map(SHORT) + " · " + gap["comparison"]
 
 main, side = ui.section()
 with main:
-    ui.numbers([(f"{100 * top.diff_mid:+.1f}", "points of readmissions caught, model minus rule"),
-                (f"{100 * top.diff_low:+.1f} … {100 * top.diff_high:+.1f}",
+    ui.numbers([(f"{100 * top.cut_mid:+.1f}", "points of readmissions caught, model minus rule, "
+                                               "at the model's cutoff"),
+                (f"{100 * top.cut_low:+.1f} … {100 * top.cut_high:+.1f}",
                  "95% interval, patients resampled")])
     for row in models.itertuples():
-        ui.stamp(f"{POPULATIONS[row.population]} · {row.model_verdict}")
-    gap = models.assign(population=lambda d: d["population"].map(POPULATIONS))
-    pts = alt.Chart(gap).encode(y=alt.Y("population:N", title=None,
-                                        sort=list(POPULATIONS.values())),
-                                tooltip=["population:N", "model_verdict:N",
-                                         alt.Tooltip("diff_mid:Q", title="median", format="+.1%"),
-                                         alt.Tooltip("diff_low:Q", title="95% from", format="+.1%"),
-                                         alt.Tooltip("diff_high:Q", title="95% to", format="+.1%")])
+        ui.stamp(f"{POPULATIONS[row.population]} · {row.cutoff_verdict}")
+    pts = alt.Chart(gap).encode(
+        y=alt.Y("row:N", title=None, sort=list(gap["row"])),
+        tooltip=["row:N", "verdict:N",
+                 alt.Tooltip("mid:Q", title="median", format="+.1%"),
+                 alt.Tooltip("low:Q", title="95% from", format="+.1%"),
+                 alt.Tooltip("high:Q", title="95% to", format="+.1%")])
     span = pts.mark_rule(strokeWidth=3, color=p["series"][0]).encode(
-        x=alt.X("diff_low:Q", title="readmissions caught, model minus rule (points)",
-                axis=alt.Axis(format="+.0%")), x2="diff_high:Q")
-    mid = pts.mark_point(filled=True, size=110, color=p["series"][0]).encode(x="diff_mid:Q")
+        x=alt.X("low:Q", title="model minus rule, points caught",
+                axis=alt.Axis(format="+.0%")), x2="high:Q")
+    mid = pts.mark_point(filled=True, size=110, color=p["series"][0]).encode(x="mid:Q")
     verdict = pts.mark_text(align="left", dx=10, dy=-12, fontSize=11).encode(
-        x="diff_low:Q", text="model_verdict:N", color=alt.value(p["muted"]))
+        x="low:Q", text="verdict:N", color=alt.value(p["muted"]))
     zero = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(
         color=p["accent"], strokeDash=[4, 4]).encode(x="x:Q")
-    ui.figure((zero + span + mid + verdict).properties(height=150), "5.1",
-              "The model's lead over the rule at the same number of alerts: median and 95% "
-              "interval, resampling patients. It beats the rule only if the whole interval is "
-              "right of zero (dashed). The recalls themselves are hidden: each rests on 1-10 "
-              "readmissions caught or missed.")
+    ui.figure((zero + span + mid + verdict).properties(height=60 * len(gap)), "5.1",
+              "The model's lead over the rule, median and 95% interval, resampling patients, "
+              "measured two ways. At its cutoff: the model flags what its training cutoff "
+              "flags, and the rule, which is yes/no, is cut at random to as many alerts. At the "
+              "rule's count: both flag as many as the rule does, which no deployment would. It "
+              "beats the rule only if the whole interval is right of zero (dashed). The "
+              "recalls themselves are hidden: each rests on 1-10 readmissions caught or missed.")
 with side:
+    champion = (f"v{live.new_version}, the same model with a new cutoff set by chapter 6's "
+                "retraining loop" if pd.notna(live.new_version) else
+                f"still v{live.champion_version}: the live retraining run changed nothing")
     ui.notes("Synthetic data: the model's absolute score means nothing here; only the "
              "comparison with the rule does.",
              "It beats the rule only if the whole 95% interval is above zero, and under 30 "
              "readmissions is too few to judge. Both fixed before any number was seen. "
              "<i>D71</i>",
-             f"The live champion is now v{live.new_version}: the same model with a new cutoff, "
-             "set by chapter 6's retraining loop. <i>D75</i>")
+             "First published judged at the rule's count only, as \"no better\". An audit "
+             "pointed out no deployment runs there; and training reached back to 1915, so "
+             "drift was there on day one. Training now starts in 2000. <i>D80</i>",
+             f"The live champion is {champion}. <i>D75, D80</i>")
 
 ui.heading("Drift", "Has the data moved since training?")
 main, side = ui.section()
@@ -112,8 +133,8 @@ with main:
         tooltip=["population:N", "period:O", alt.Tooltip("value:Q", format=".1%")])
     ui.figure((band + line).properties(height=240), "5.3",
               "Share of stays each champion flags per year, with its 95% interval. Its cutoff "
-              "was fixed in training to flag as many as the rule did then, about 22%: a move "
-              "away from that is drift, not an error. Chapter 6 picks this up.")
+              "was fixed in training to flag as many as the rule did then: a move away from "
+              "that is drift, not an error. Chapter 6 picks this up.")
 with side:
     ui.notes("A true/false feature is judged by its rate, not PSI: PSI barely moves on two "
              "values. Heart disease went from about 22% to 35% of stays at a PSI of 0.09.",

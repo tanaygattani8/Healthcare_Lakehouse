@@ -79,6 +79,16 @@ def test_a_lone_hidden_level_stops_the_publish():
         check_small_cells(_levels(suppressed=[True, False]))
 
 
+def test_hidden_levels_that_sum_to_1_to_10_stop_the_publish():
+    levels = pd.DataFrame({
+        "signal": ["g"] * 4, "suppressed": [False, False, True, True],
+        "index_stays": [500, 400, None, None], "readmitted": [20, 30, None, None],
+        "rest_stays": [600, 700, None, None], "rest_readmitted": [36, 26, None, None]})
+    with pytest.raises(SystemExit, match="between them"):
+        check_small_cells(levels)
+    check_small_cells(levels.assign(rest_readmitted=[45, 35, None, None]))
+
+
 def _results():
     # Made-up counts: one row safe, one with 1-10 caught, one with 1-10 missed,
     # and a base-rate row, which has no caught or missed. None, not NaN, is how
@@ -95,7 +105,10 @@ def _results():
         "brier": [0.02] * 4, "cv_avg_precision": [0.1, 0.1, None, None],
         "diff_low": [0.01, None, None, None], "diff_mid": [0.1, None, None, None],
         "diff_high": [0.2, None, None, None],
-        "model_verdict": ["beats", "too few to judge", None, None]})
+        "model_verdict": ["beats", "too few to judge", None, None],
+        "cut_low": [0.02, None, None, None], "cut_mid": [0.1, None, None, None],
+        "cut_high": [0.2, None, None, None],
+        "cutoff_verdict": ["beats", None, None, None]})
 
 
 def test_recall_on_1_to_10_caught_or_missed_is_hidden_and_no_count_is_published():

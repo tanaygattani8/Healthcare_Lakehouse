@@ -134,8 +134,8 @@ with side:
              "patients are sent back to the ward 10.6% of the time. <i>D69</i>",
              "Heart disease or stroke, diabetes and gender are that rule. Age, hypertension "
              "and more conditions mostly are, but still separate without it.",
-             "A hidden level had 1-10 stays or readmissions, or was the one level that would "
-             "give a hidden count back by subtraction. <i>D66</i>")
+             "A hidden level had 1-10 stays or readmissions, or was hidden with them so the "
+             "total minus the shown levels cannot give 1-10 back. <i>D66, D79</i>")
 
 ui.heading("4 · 3", "What happened around the stay?")
 main, side = ui.section()

@@ -1,10 +1,17 @@
 -- One row per patient.
 --
--- All identifying columns live here and nowhere else. Phase 3 strips exactly
--- this table, so keeping them together is the point, not an accident.
+-- silver.patient is the only published silver table with identifying
+-- columns, and they are tagged and masked there (sql/governance_tags.sql).
+-- bronze.br_patients holds the raw strings, tagged the same way, and the
+-- quarantine copy in ops too (governance_quarantine.sql).
+--
+-- v_patient is a TEMPORARY VIEW, so nothing is stored. Published, it was an
+-- untagged copy of every identifier beside the masked table. PRIVATE was
+-- tried first and is not enough: the pipeline still stores a private view,
+-- renamed bronze.__<pipeline id>_v_patient, with a backing table (D79).
 --
 -- The quarantine pattern used by every silver table:
---   v_<name>  -- typed, with a violations array
+--   v_<name>  -- typed, with a violations array (a temporary view for patient)
 --   <name>    -- valid rows only, in silver
 --   ops.quarantine_<name> -- failing rows kept whole, never deleted
 --
@@ -12,7 +19,7 @@
 -- deletes the row and keeps a count; the row itself is gone. Splitting the
 -- typed view in two is how the row survives.
 
-CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.v_patient AS
+CREATE TEMPORARY VIEW v_patient AS
 SELECT
     Id                                        AS patient_id,
     TRY_CAST(BIRTHDATE AS DATE)               AS birth_date,
@@ -53,9 +60,9 @@ CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.patient
 )
 COMMENT "One row per patient. All PII concentrates here; phase 3 targets it."
 TBLPROPERTIES ("quality" = "silver")
-AS SELECT * FROM ${catalog}.silver.v_patient;
+AS SELECT * FROM v_patient;
 
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.ops.quarantine_patient
 COMMENT "Patients that failed a rule. Kept whole, never discarded."
-AS SELECT * FROM ${catalog}.silver.v_patient WHERE size(violations) > 0;
+AS SELECT * FROM v_patient WHERE size(violations) > 0;

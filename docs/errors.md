@@ -91,6 +91,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E66](#e66) | Small-multiple charts cut off at the right on a phone | app |
 | [E67](#e67) | `Cannot read properties of undefined (reading 'forEach')` in `parseAxesAndHeaders` | app |
 | [E68](#e68) | `DagBag.__init__() got an unexpected keyword argument 'include_examples'` | 10 |
+| [E69](#e69) | `DELTA_INSERT_COLUMN_ARITY_MISMATCH` restoring the clearance row: the user is left uncleared | audit |
 
 ---
 
@@ -1855,3 +1856,23 @@ bundle_path, bundle_name`.
 **Fix.** `DagBag("/opt/airflow/dags")`. An example DAG, if one ever loaded,
 would still fail the check's exact-ids rule. Found by probe 1, before the
 check reached CI.
+
+### E69 — restoring clearance fails, and the user is left uncleared {#e69}
+```
+[DELTA_INSERT_COLUMN_ARITY_MISMATCH] Cannot write to 'healthcare_dev.ops.phi_clearance',
+not enough data columns; target table has 3 column(s) but the inserted data has 2 column(s).
+```
+
+**Cause.** A probe for D79 copied `sql/governance_verify.sql`'s pattern:
+delete your own clearance row, read as an uncleared user, insert it back.
+That insert names two values. The row filter (phase 3a, after the verify
+file was written) added `scope_state` as a third column, so the restore
+failed after the delete had succeeded. For under a minute the only account
+had no clearance row: a gold build then would have filled gold with `***`
+or left it empty (D47). Nothing ran.
+
+**Fix.** The insert names its columns and gives all three:
+`(user_email, level, scope_state) VALUES (current_user(), 'full', '*')`,
+in the probe and in `governance_verify.sql`. The file had carried the
+same bug since the row filter landed; it had not been re-run since.
+
