@@ -1,8 +1,4 @@
-"""Run the medallion pipeline end to end.
-
-Manually triggered only. The snapshot stays a manual step after this (D36).
-Nothing runs until the PHI gate passes (D81).
-"""
+"""Run the medallion pipeline by hand, only after the PHI gate passes (D36, D81)."""
 
 import os
 
@@ -12,11 +8,7 @@ from airflow.providers.databricks.operators.databricks import DatabricksSubmitRu
 from airflow.sdk import DAG, task
 
 CONN = "databricks_default"
-# The mask policies apply to the identity the pipeline runs as (D47). Without
-# a full clearance row, gold fills with '***' and fixed dates; with the wrong
-# scope, gold comes out empty; neither raises an error. And a PHI column with
-# no mask is the leak governance_check.sql looks for: its CHECK 1 and CHECK 3
-# are copied here, and tests/test_dag_gate.py keeps the two lists in step.
+# governance_check.sql's CHECK 1 and 3 plus the clearance row (D47); kept in step by a test.
 PHI_GATE = """
 SELECT
   (SELECT count(*) FROM healthcare_dev.ops.phi_clearance
@@ -46,9 +38,7 @@ SELECT
 
 with DAG(
     dag_id="medallion",
-    # Never scheduled. On Databricks Free Edition, quota exhaustion locks
-    # workspace compute for the rest of the day; a DAG firing on a timer can
-    # do that while nobody is watching. Runs only when triggered by hand.
+    # Never scheduled: a Free Edition quota lockout could fire unattended.
     schedule=None,
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
@@ -57,8 +47,7 @@ with DAG(
 
     @task
     def phi_gate():
-        """Fail, before any compute, unless the run-as user is fully cleared
-        and every PHI column is tagged and masked (D47, D79, D81)."""
+        """Fail before any compute unless the run-as user is cleared and every PHI column masked."""
         # /sql/1.0/warehouses/<id>, the same .env value scripts/dbx.py uses.
         warehouse = os.environ["DATABRICKS_HTTP_PATH"].rstrip("/").rsplit("/", 1)[1]
         reply = DatabricksHook(CONN)._do_api_call(
@@ -75,8 +64,7 @@ with DAG(
         if tagged_unmasked or untagged_phi:
             raise RuntimeError("a PHI column is unmasked: run sql/governance_check.sql")
 
-    # DatabricksRunNowOperator only runs Jobs; this one submits a one-time run
-    # with a pipeline task and polls it to a terminal state (D33).
+    # Submits a one-time run with a pipeline task; RunNow only runs Jobs (D33).
     run_medallion = DatabricksSubmitRunOperator(
         task_id="run_medallion",
         databricks_conn_id=CONN,
@@ -87,8 +75,7 @@ with DAG(
                 "pipeline_task": {"pipeline_id": os.environ["MEDALLION_PIPELINE_ID"]},
             }
         ],
-        # The pipeline already retries itself on failure (errors.md E19,
-        # E24). Retrying here too turns one failure into several runs.
+        # The pipeline retries itself (E19, E24).
         retries=0,
     )
 

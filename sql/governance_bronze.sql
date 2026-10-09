@@ -1,21 +1,4 @@
--- D79 — bring bronze.br_patients under the same governance as silver.patient.
---
--- Bronze keeps every identifier as the raw CSV string. Masking only the silver
--- copy left this one readable by anyone who can read bronze, which the audit
--- found and governance_check.sql CHECK 3 now catches.
---
--- Same tag values as silver, so the census and CHECK 1 compare like with like.
--- One policy, not four: every bronze column is a STRING, so mask_text fits all
--- eight values and returns '***'. Silver's year-keeping date mask and ZIP
--- truncation need typed columns; nothing should read bronze but the pipeline.
---
--- The pipeline reads this table to build silver. It runs as a cleared user, so
--- it sees real values. Without the clearance row every birth date reads '***',
--- fails TRY_CAST, and every patient lands in ops.quarantine_patient: the D47
--- hazard, but now loud rather than silent.
---
--- Re-runnable. Replaces governance_notes.sql's bronze policy, which matched
--- only the five text values.
+-- D79: bronze.br_patients under silver's tags, one mask_text policy for every value; re-runnable.
 
 ALTER TABLE healthcare_dev.bronze.br_patients ALTER COLUMN SSN        SET TAGS ('phi_category' = 'ssn');
 ALTER TABLE healthcare_dev.bronze.br_patients ALTER COLUMN DRIVERS    SET TAGS ('phi_category' = 'license');

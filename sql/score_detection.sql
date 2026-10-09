@@ -1,34 +1,7 @@
--- Phase 3b step 5 — mark every program against the answer sheet, test set only.
---
--- A guess is right if it overlaps a real item of the same kind. Overlap, not
--- exact match: finding 'Babara Isadora' where the sheet has 'Babara' and
--- 'Isadora' separately is not a failure.
---
---   recall    = real items hit by at least one guess / real items
---   precision = guesses that hit at least one real item / guesses
---
--- The two need DIFFERENT top numbers. The first version used "guesses that
--- hit" for both, and guesses and real items are not one-to-one: the name model
--- split one date into four pieces (recall came out 1.053) and the language
--- model covered two names with one guess (recall came out 0.88, really
--- 0.996). errors.md E45.
---
--- Kinds with no real items are kept (real_items is NULL). Every guess there
--- is a false alarm — flagged ages under 90, insurers, drug doses read as ZIP
--- codes — and joining them away made every program look cleaner than it is.
---
--- recall is the column that matters: a miss is a real name left in a document.
---
--- Two stricter rules, reported so the choice is made with all three in view
--- (decision.md D54):
---   exact_recall   - some guess starts and ends exactly where the real item
---                    does. Punishes 'Babara Isadora' for hiding two names.
---   covered_recall - some ONE guess spans the whole real item. What
---                    de-identification needs: overlap counts 'Luc' as
---                    finding 'Lucius' and leaves 'ius' in the document.
---
--- Saved to ops.detection_score, the one place the MLflow runs and the app's
--- snapshot read from. Counts only — no text.
+-- Phase 3b step 5: mark every program against the answer key by overlap, test set only.
+-- recall = real items hit / real items; precision = guesses that hit / guesses (E45).
+-- Kinds with no real items are kept: every guess there is a false alarm.
+-- exact_recall and covered_recall are the stricter rules (D54); counts only, no text.
 
 CREATE OR REPLACE TABLE healthcare_dev.ops.detection_score
 COMMENT "Phase 3b marks: each detection program against the answer sheet, 25 test patients. Counts only."

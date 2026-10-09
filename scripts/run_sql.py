@@ -14,12 +14,7 @@ def _is_comment(statement: str) -> bool:
 
 
 def _terminator(line: str) -> int | None:
-    """Where this line's statement ends, or None.
-
-    A ';' only ends a statement when it is code — not inside a '--' comment,
-    and not inside a quoted string. Both have now broken a run: prose in a
-    comment (errors.md E34) and prose inside a COMMENT '...' literal.
-    """
+    """Where this line's statement ends, or None; ';' in a comment or string doesn't count (E34)."""
     quote = ""          # which character opened the string we are inside
     i = 0
     while i < len(line):
@@ -32,8 +27,7 @@ def _terminator(line: str) -> int | None:
                 else:
                     quote = ""
         elif char in "'\"":
-            # Both kinds matter: COMMENT "..." is how this project writes
-            # table comments, and those comments are English prose.
+            # Both quote kinds: table COMMENT "..." literals hold prose.
             quote = char
         elif char == "-" and line[i : i + 2] == "--":
             return None
@@ -44,8 +38,7 @@ def _terminator(line: str) -> int | None:
 
 
 def _statements(text: str) -> list[str]:
-    # ponytail: one terminator per line, and no /* block comments */. Both
-    # hold for every file here — reach for sqlglot if that ever stops.
+    # ponytail: one terminator per line, no /* */ comments; use sqlglot if that changes.
     chunks: list[str] = []
     buffer: list[str] = []
     for line in text.splitlines():
@@ -57,8 +50,7 @@ def _statements(text: str) -> list[str]:
             chunks.append("\n".join(buffer))
             buffer = [line[end + 1 :]]
     chunks.append("\n".join(buffer))
-    # A file ending in a comment leaves a trailing comment-only chunk, which
-    # the warehouse rejects as a parse error after every statement succeeded.
+    # Drop a trailing comment-only chunk; the warehouse rejects it.
     return [s.strip() for s in chunks if s.strip() and not _is_comment(s)]
 
 
@@ -67,8 +59,7 @@ def run_file(path: Path) -> None:
         for statement in _statements(path.read_text(encoding="utf-8")):
             print(f" {statement.splitlines()[0][:80]}")
             cur.execute(statement)
-            # A probe whose answer is a row is useless if the row is discarded.
-            # ponytail: capped at 20 — this prints, it does not report.
+            # ponytail: a probe's rows are printed, capped at 20.
             if cur.description:
                 for row in cur.fetchmany(20):
                     print(f"    {row}")

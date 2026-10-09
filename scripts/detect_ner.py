@@ -1,22 +1,4 @@
-"""Program 2: the name-finding model, run on the laptop.
-
-obi/deid_roberta_i2b2 (decision.md D51). It first ran as a Databricks job and
-was stopped two hours in by Free Edition's usage cap (RESOURCE_USAGE_BLOCKED),
-with ~4 hours left. The laptop has the notes, no cap, and costs nothing.
-
-Needs two packages that are deliberately NOT in requirements.txt — CI installs
-that file on every push and never runs this:
-
-    .venv/Scripts/python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-    .venv/Scripts/python.exe -m pip install transformers
-
-Resumable: patients are appended to data/detections/ner.csv one at a time and
-skipped on the next run. sql/load_detections.sql replaces the whole 'ner'
-stage from this file, including the partial rows the Databricks job saved.
-
-    .venv/Scripts/python.exe -m scripts.detect_ner --pieces 5   # time it, save nothing
-    .venv/Scripts/python.exe -m scripts.detect_ner              # the real run
-"""
+"""Program 2: obi/deid_roberta_i2b2 run locally (D51); needs torch and transformers."""
 
 from __future__ import annotations
 
@@ -30,12 +12,10 @@ NOTES = Path("synthea/output/notes")
 OUT = Path("data/detections/ner.csv")
 MODEL = "obi/deid_roberta_i2b2"
 
-# The pieces, exactly as silver/note_chunk.sql cuts them: 2,000 characters,
-# a new one every 1,800, so a name on a boundary is whole in one of them.
+# Same pieces as silver/note_chunk.sql: 2,000 characters every 1,800.
 PIECE, STEP = 2000, 1800
 
-# i2b2's labels, mapped onto the answer sheet's words. STAFF is a name too:
-# a clinician's name in a note is as identifying as the patient's.
+# i2b2 labels to answer-key categories; STAFF names identify too.
 KIND = {
     "PATIENT": "name", "STAFF": "name",
     "DATE": "date", "AGE": "age",
@@ -45,29 +25,12 @@ KIND = {
 
 
 def heldout(notes: dict[str, Path]) -> list[str]:
-    """The 25 test patients, as sql/heldout_patient.sql picks them.
-
-    Computed here rather than read from ops.heldout_patient because the
-    warehouse is behind the same usage cap. Checked against that table's
-    output (the 25 ids in regex.csv) before the real run.
-    """
+    """The 25 test patients, computed as sql/heldout_patient.sql picks them."""
     return sorted(notes, key=lambda p: hashlib.md5(p.encode()).hexdigest())[:25]
 
 
 def merge(tokens: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
-    """Join neighbouring tokens of the same kind into one span.
-
-    This model labels B-/I-/L-/U- (begin, inside, last, unit). Hugging Face's
-    'simple' grouping only understands B-/I-, so 'Luc' + 'ius' came back as
-    two fragments. A gap of one character (space, newline) still joins, so
-    'Lucius Emard' is one name. Overlaps from overlapping pieces and windows
-    collapse here too.
-
-    Each kind is joined separately. Overlapping windows can label the same
-    token differently, and comparing only with the previous span of ANY kind
-    let a 'geography' token sit between name fragments and keep them apart:
-    'Babara' came back as 'B' + 'ab' + 'ara' (errors.md E45).
-    """
+    """Join B-/I-/L-/U- tokens of one kind into spans, per kind so fragments aren't split (E45)."""
     last: dict[str, list] = {}
     spans: list[list] = []
     for start, end, kind in sorted(tokens):
@@ -95,8 +58,7 @@ def main() -> None:
     labels = model.config.id2label
 
     def tag(text: str) -> tuple[set[tuple[int, int, str]], int]:
-        # Explicit 512-token windows: the model cannot read further, and a
-        # pipeline that truncates does it without saying so.
+        # Explicit 512-token windows: a truncating pipeline drops text silently.
         enc = tokenizer(text, return_offsets_mapping=True, return_overflowing_tokens=True,
                         truncation=True, max_length=512, stride=64,
                         padding=True, return_tensors="pt")
@@ -129,8 +91,7 @@ def main() -> None:
 
     started, pieces_done, over_512 = time.time(), 0, 0
     for n, patient_id in enumerate(todo[:1] if args.pieces else todo, 1):
-        # Read exactly as build_answer_key.py does, so positions line up with
-        # the answer sheet.
+        # Read exactly as build_answer_key.py does, so positions line up.
         note = notes[patient_id].read_text(encoding="utf-8", errors="replace")
         starts = range(0, max(len(note), 1), STEP)
         if args.pieces:

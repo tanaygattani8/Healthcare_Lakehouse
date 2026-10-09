@@ -1,10 +1,5 @@
 # Databricks notebook source
-# Phase 6 training (spec §4). For each population: choose between logistic
-# regression and gradient boosting by patient-grouped CV on stays from 2000 to
-# 2019 (rm.TRAIN_FROM, D80), refit the winner, judge it against the rule on
-# 2020-2026 twice: at the same number of alerts (D71), and at its deployed
-# cutoff against the rule thinned to as many (D80). Log it all to MLflow,
-# register the champion in Unity Catalog, and write ml.model_results.
+# Phase 6 training: pick a model by grouped CV, judge it against the rule (D71, D80).
 
 # COMMAND ----------
 
@@ -37,10 +32,7 @@ C = "healthcare_dev"
 mlflow.set_registry_uri("databricks-uc")
 mlflow.set_experiment("/Users/tanaygattani8@gmail.com/readmission")
 client = mlflow.MlflowClient()
-# MLflow 3.16 saves sklearn models with skops, which refuses any type it is not
-# told to trust (E56). These come from our own pipeline, trained in this job:
-# numpy dtypes, the column transformer, and boosting's tree nodes. Stored with
-# the model, so scoring and drift load it without repeating the list.
+# skops loads only trusted types (E56); stored with the model so scoring reuses the list.
 TRUSTED_TYPES = ["numpy.dtype", "sklearn.compose._column_transformer._RemainderColsList",
                  "sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor"]
 
@@ -68,8 +60,7 @@ for population in rm.POPULATIONS:
                                 "cv_avg_precision_sd": row["cv_ap_sd"]})
     best = max(cv, key=lambda r: r["cv_ap"])
 
-    # 2. Refit the winner on every training stay; 3. fix the cutoff on
-    # out-of-fold scores: in-sample ones look surer than new stays will (D72).
+    # 2. Refit on every training stay; 3. cutoff from out-of-fold scores (D72).
     x_train, y_train = rm.build_features(train, population), train[rm.TARGET].astype(int)
     pipe = rm.build_pipeline(best["kind"], best["params"], population).fit(x_train, y_train)
     train_scores = rm.oof_scores(pipe, train, population)
@@ -107,8 +98,7 @@ for population in rm.POPULATIONS:
                            | {"cv_avg_precision": best["cv_ap"],
                               "alert_threshold": threshold,
                               "caught_self_returns": caught_self_returns})
-        # No input example: it would be a real stay row (spec §4.4).
-        # The pyfunc flavour returns probabilities, as the signature says.
+        # No input example: it would be a real stay row.
         info = mlflow.sklearn.log_model(pipe, "model",
                                         signature=infer_signature(
                                             x_train, pipe.predict_proba(x_train)),

@@ -15,10 +15,7 @@ import json
 
 from pyspark.sql import functions as F
 
-# Each resource is read as raw JSON text, then parsed with a schema for its
-# own type. Letting Spark infer one schema for all 20 resource types fails:
-# a field like `type` is an array on Encounter, an object on Claim and text
-# elsewhere, and Spark resolves the conflict by making it a string (E48).
+# One schema per resource type: a shared inferred one turns `type` into a string (E48).
 bundles = (spark.read.option("multiLine", True)
            .schema("entry ARRAY<STRUCT<resource: STRING>>")
            .json("/Volumes/healthcare_dev/bronze/landing/fhir/"))
@@ -44,8 +41,7 @@ def ref_id(ref):
     return F.regexp_replace(ref, "^urn:uuid:", "")
 
 
-# Visit times are instants: FHIR writes -05:00/-06:00, the CSV writes UTC,
-# and to_timestamp turns both into the same moment.
+# Visit times are instants: offsets and UTC both land on the same moment.
 encounter = (parsed("Encounter", ENCOUNTER)
     .select(F.col("r.id").alias("encounter_id"),
             ref_id(F.col("r.subject.reference")).alias("patient_id"),
@@ -54,9 +50,7 @@ encounter = (parsed("Encounter", ENCOUNTER)
             F.col("r.class.code").alias("encounter_class_code"),
             F.col("r.type")[0]["coding"][0]["code"].alias("type_code")))
 
-# Diagnosis dates are calendar dates: take the date as written. to_date() on
-# the full string would convert to UTC first and move late-evening dates to
-# the next day (the D50 trap).
+# Diagnosis dates are calendar dates: take them as written, not via UTC (D50).
 condition = (parsed("Condition", CONDITION)
     .select(F.col("r.id").alias("condition_id"),
             ref_id(F.col("r.subject.reference")).alias("patient_id"),

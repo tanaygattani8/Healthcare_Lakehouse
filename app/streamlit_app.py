@@ -1,5 +1,4 @@
-"""The app's entry point: the pages and the top bar. Each chapter is its own
-script in chapters/; the design kit is ui.py."""
+"""Entry point: pages and top bar; chapters live in chapters/, the design kit in ui.py."""
 
 import streamlit as st
 from ui import CHAPTERS

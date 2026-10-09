@@ -1,10 +1,4 @@
--- Phase 3b step 4 — load the programs that run on the laptop.
---
--- scripts/detect_regex.py and scripts/detect_llm.py each write a CSV to
--- data/detections/, which is uploaded to the landing volume with:
---   databricks fs cp -r --overwrite data/detections dbfs:/Volumes/healthcare_dev/bronze/landing/detections
--- Every CSV carries its own `stage` column, so this file loads whichever are
--- there and replaces those stages only. Safe to re-run.
+-- Phase 3b step 4: load data/detections/*.csv, replacing only the stages present; re-runnable.
 
 CREATE OR REPLACE TEMPORARY VIEW incoming AS
 SELECT * FROM read_files(

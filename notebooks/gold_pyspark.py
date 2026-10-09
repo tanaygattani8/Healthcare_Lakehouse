@@ -1,7 +1,5 @@
 # Databricks notebook source
-# Track B: readmission_events and patient_360 built a second time with the
-# DataFrame API, from the rules (decision.md D58, D60), into ops, never gold.
-# notebooks/reconcile_gold.py then proves the two engines agree row for row.
+# Track B: readmission_events and patient_360 rebuilt in PySpark into ops (D58, D60).
 import json
 import time
 
@@ -42,15 +40,13 @@ planned_encounters = (procedure.join(planned_procedure.where("kind = 'cancer_tre
                                .distinct())
 inp = inp.join(planned_encounters, F.col("encounter_id") == F.col("planned_encounter_id"), "left")
 
-# A new stay begins only if this encounter starts on a later day than every
-# earlier one ended: max over all earlier rows, not just the one before.
+# A new stay starts only after every earlier encounter ended: max over all earlier rows.
 prev_end = F.max("stop_day").over(before)
 inp = inp.withColumn("starts_new_stay",
                      F.when(prev_end.isNull() | (F.col("start_day") > prev_end), 1).otherwise(0))
 inp = inp.withColumn("stay_no", F.sum("starts_new_stay").over(upto))
 
-# "First" = earliest start, then lowest id, so a tie is broken the same way
-# in both engines.
+# "First" = earliest start, then lowest id, same tie-break as SQL.
 first = F.struct("started_at", "encounter_id")
 stays = (inp.groupBy("patient_id", "stay_no")
             .agg(F.min_by("encounter_id", first).alias("first_encounter_id"),
@@ -62,8 +58,7 @@ stays = (inp.groupBy("patient_id", "stay_no")
                  F.min_by("reason_description", first).alias("admit_reason"),
                  F.max(F.col("planned_encounter_id").isNotNull()).alias("cancer_treatment")))
 
-# Stays with a scheduled heart operation from the day before admission to
-# discharge, unless the operation was an emergency (D68).
+# Scheduled heart operations from the day before admission to discharge, unless emergency (D68).
 heart_kinds = F.col("kind").isin("heart_surgery", "emergency_heart_surgery")
 surgery = (procedure.join(planned_procedure.where(heart_kinds),
                           F.col("source_code") == F.col("code"))
@@ -77,8 +72,7 @@ planned_surgery = (stays.join(surgery, (F.col("sp") == F.col("patient_id"))
                         .agg((~F.max("emergency")).alias("planned_surgery"))
                         .where("planned_surgery"))
 
-# Planned follows the reason the stay began with, except cancer treatment
-# (D64) and scheduled heart surgery (D68), which are planned wherever they fall.
+# Planned follows the first reason, except cancer treatment (D64) and scheduled heart surgery (D68).
 stays = (stays.join(planned.withColumnRenamed("reason_description", "admit_reason")
                            .withColumn("is_planned", F.lit(True)),
                     "admit_reason", "left")
@@ -132,8 +126,7 @@ readmission_events = (
                  F.col("days_to_unplanned_return").isNotNull().alias("readmitted_30d"),
                  (~(died | short | in_hospice | cancer)).alias("is_index_stay")))
 
-# overwriteSchema: rebuilt whole every run, so a rule that adds a column
-# (D64's excl_cancer_treatment) replaces the old schema instead of failing.
+# overwriteSchema: rebuilt whole each run, so a new column replaces the schema.
 (readmission_events.write.mode("overwrite").option("overwriteSchema", "true")
                    .saveAsTable(f"{C}.ops.pyspark_readmission_events"))
 seconds_readmission = time.time() - started
@@ -160,8 +153,7 @@ conditions = condition.groupBy("patient_id").agg(
     F.count("*").alias("conditions"),
     F.count_if(F.col("resolved_date").isNull()).alias("active_conditions"))
 
-# Latest value of each vital: only that code's rows count, then the value at
-# the latest moment.
+# Latest value of each vital code.
 LATEST = {"39156-5": "latest_bmi", "8480-6": "latest_systolic",
           "8462-4": "latest_diastolic", "4548-4": "latest_hba1c"}
 latest = (spark.table(f"{C}.silver.observation")

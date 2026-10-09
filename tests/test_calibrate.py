@@ -93,7 +93,6 @@ def test_render_markdown_includes_rows_per_patient(tmp_path):
     })
     assert "encounters.csv" in md
     assert "5.0" in md  # 5000 rows / 1000 patients
-    # Reporting the CSV total here instead would be a silent 4x error, and the
-    # report's own closing paragraph tells the reader to size from this number.
+    # The CSV total here would be a silent 4x error.
     assert "**Total Parquet bytes:** 256" in md
     assert "1,500" in md  # max note length, not just the mean

@@ -1,5 +1,4 @@
--- Phase 4, step 8. Run once; notebooks/reconcile_gold.py appends a row per
--- table per run.
+-- Phase 4 step 8: run once; reconcile_gold.py appends per table per run.
 CREATE TABLE IF NOT EXISTS healthcare_dev.ops.reconciliation_results (
     run_at            TIMESTAMP,
     table_name        STRING,

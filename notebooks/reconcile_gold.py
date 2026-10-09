@@ -1,7 +1,5 @@
 # Databricks notebook source
-# Track B, the proof: gold's SQL tables against notebooks/gold_pyspark.py's
-# PySpark ones, both directions, row for row. Every run is appended to
-# ops.reconciliation_results; both only_in columns must be 0.
+# Track B proof: SQL gold vs PySpark, both directions, appended to ops.reconciliation_results.
 import contextlib
 import io
 import json
@@ -31,17 +29,14 @@ def timed_count(df):
 
 
 def columns(df):
-    # Names and types only. StructType equality also compares nullability, and
-    # a PySpark count() is NOT NULL where the pipeline's column is nullable.
+    # Names and types only: nullability differs between count() and the pipeline.
     return [(f.name, f.dataType.simpleString()) for f in df.schema]
 
 
 patients = spark.table(f"{C}.silver.patient").count()
 rows, report = [], {}
 for name, (sql_table, py_table) in PAIRS.items():
-    # Columns the PySpark track does not build: key_copies is a gate (E59),
-    # and the phase 8 stay columns are proved by readmission_signals'
-    # fingerprint. drop() ignores a name a table lacks.
+    # Columns PySpark doesn't build: key_copies is a gate (E59), stay columns are fingerprinted.
     a = spark.table(sql_table).drop("key_copies", "organization_id", "payer_id",
                                     "length_of_stay_days", "stay_claim_cost")
     b = spark.table(py_table)

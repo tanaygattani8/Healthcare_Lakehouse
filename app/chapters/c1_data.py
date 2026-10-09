@@ -1,5 +1,4 @@
-"""Chapter 1: bronze and silver. Every raw row lands; every row that fails a
-rule is kept in quarantine rather than dropped."""
+"""Chapter 1: bronze and silver; every failing row is quarantined, not dropped."""
 
 import altair as alt
 import ui

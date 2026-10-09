@@ -1,9 +1,4 @@
-"""Mark one text-to-SQL answer: a verdict per contestant per question.
-
-Execution accuracy (spec §5): the contestant's result must equal the answer
-key's, however different the SQL. Pure functions; nothing here touches
-Databricks, so every rule is tested on the laptop.
-"""
+"""Execution accuracy: a contestant's result must equal the answer key's; pure functions."""
 
 from __future__ import annotations
 
@@ -44,10 +39,7 @@ def _same(a, b) -> bool:
 
 
 def _sort_key(row: tuple) -> tuple:
-    # Mixed types and NULLs must sort without error. Numbers sort by their
-    # 2-decimal value, so values within the tolerance land side by side.
-    # ponytail: two numbers straddling a rounding edge can sort apart; widen
-    # the key if that ever shows up as a false wrong_result.
+    # ponytail: numbers straddling a rounding edge can sort apart; widen the key if that bites.
     return tuple((0, "") if v is None
                  else (1, round(v, 2)) if isinstance(v, float) and not isinstance(v, bool)
                  else (2, str(v)) for v in row)
@@ -73,9 +65,7 @@ def results_match(expected: list[tuple], actual: list[tuple], ordered: bool = Fa
     if have < width:
         return False
 
-    # Find candidate actual columns for each expected column.
-    # A column j is a candidate for expected column i if their values
-    # (as unordered multisets) match within tolerance.
+    # Column j is a candidate for i if their values match as multisets within tolerance.
     candidates = []
     for exp_col in range(width):
         exp_values = [tuple([row[exp_col]]) for row in expected]
@@ -89,8 +79,7 @@ def results_match(expected: list[tuple], actual: list[tuple], ordered: bool = Fa
             return False
         candidates.append(col_candidates)
 
-    # Search for valid assignments: one actual column per expected column,
-    # with no actual column used twice.
+    # One actual column per expected column, none used twice.
     assignments_tried = 0
     for assignment in product(*candidates):
         if len(set(assignment)) != len(assignment):

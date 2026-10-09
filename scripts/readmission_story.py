@@ -1,9 +1,4 @@
-"""Chapter 5's rule (spec §5), fixed before any number was looked at.
-
-Pure Python: publish_snapshot feeds it counts from the metric views, and
-it decides, per signal level, whether readmitted stays separate from the
-rest, and whether phase 6 is GO.
-"""
+"""Chapter 5's rule, fixed before any number was seen: which levels separate, GO or NO-GO."""
 
 from __future__ import annotations
 
@@ -25,9 +20,7 @@ SIGNALS = {
     "admit_reason_group": 3, "is_planned": 3, "above_median_length_of_stay": 3,
     "prior_stays_12m_band": 3, "prior_emergency_12m_band": 3, "post_followup_7d": 3,
 }
-# Shown in the story, never shortlisted: a calendar dimension, and a fact
-# known only after discharge. The prefixes are a second guard, so a new
-# post_ or outcome_ signal cannot be shortlisted by being left off this set.
+# Shown, never shortlisted: not known at discharge; the prefixes guard new ones.
 NOT_AT_DISCHARGE = {"admit_period", "post_followup_7d"}
 LEAK_PREFIXES = ("post_", "outcome_")
 
@@ -44,8 +37,7 @@ class Side:
 
 
 def wilson(k: int, n: int, z: float = Z) -> tuple[float, float]:
-    """The Wilson interval for k of n. Unlike p ± z·se it stays inside 0-1,
-    which matters for a level with few or no readmissions."""
+    """Wilson interval for k of n; stays inside 0-1."""
     if n == 0:
         return 0.0, 1.0
     p = k / n
@@ -55,8 +47,7 @@ def wilson(k: int, n: int, z: float = Z) -> tuple[float, float]:
 
 
 def separates(level: Side, rest: Side) -> bool:
-    """Spec §5: enough stays on both sides, enough different people behind
-    the higher rate, and 95% intervals that do not overlap."""
+    """Enough stays both sides, enough people behind the higher rate, intervals apart."""
     if min(level.stays, rest.stays) < MIN_STAYS:
         return False
     if max(level, rest, key=lambda side: side.rate).readmitted_patients < MIN_PATIENTS:
@@ -67,8 +58,7 @@ def separates(level: Side, rest: Side) -> bool:
 
 
 def shortlist(rows: Iterable[tuple[str, bool]]) -> list[str]:
-    """Signals known at discharge with at least one level that separates.
-    rows: (signal, separates), one per level."""
+    """Signals known at discharge with at least one separating level."""
     return sorted({signal for signal, sep in rows
                    if sep and signal not in NOT_AT_DISCHARGE
                    and not signal.startswith(LEAK_PREFIXES)})
@@ -84,10 +74,7 @@ def _small(side: Side) -> bool:
 
 
 def level_row(signal: str, level: str, side: Side, rest: Side) -> dict:
-    """One published row. Whether the level separates is decided on the real
-    counts; then a level whose stays or readmissions, or the rest's, number
-    1-10 loses every count and rate (D66). Rates go too, since rate × stays
-    gives the count back. Patient counts are never published (plan P-e)."""
+    """One published row; any 1-10 count on either side hides every count and rate (D66)."""
     row = {"signal": signal, "chapter": SIGNALS[signal], "level": level,
            "at_discharge": signal not in NOT_AT_DISCHARGE,
            "separates": separates(side, rest),
@@ -103,9 +90,7 @@ def level_row(signal: str, level: str, side: Side, rest: Side) -> dict:
 
 
 def hidden_sum(rows: list[dict]) -> Side | None:
-    """What a signal's hidden levels hold together: the total, read off any
-    shown level and its rest, minus every shown level. None if nothing is
-    shown, since then there is nothing to subtract."""
+    """What a signal's hidden levels hold together, by subtraction; None if nothing is shown."""
     shown = [row for row in rows if not row["suppressed"]]
     if not shown:
         return None
@@ -116,11 +101,7 @@ def hidden_sum(rows: list[dict]) -> Side | None:
 
 
 def complete_suppression(rows: list[dict]) -> list[dict]:
-    """A signal's levels add up to the published totals, so its hidden levels
-    are found together by subtraction. Hide more levels until they hold 0 or
-    11+ stays and readmissions between them, and never just one (D66, D79).
-    Each extra is the catch-all "other" if shown, as the level that means
-    least, then the smallest, preferring one with readmissions."""
+    """Hide more levels until the hidden ones hold 0 or 11+ together, never just one (D66, D79)."""
     out = list(rows)
     for signal in {row["signal"] for row in out}:
         mine = [i for i, row in enumerate(out) if row["signal"] == signal]

@@ -1,9 +1,4 @@
-""" Measure a Synthea output directory and produce a markdown report.
-
-Row counts, not patient counts, are what size this project. Synthea writes a
-full birth-to-death record per patient, so per-entity row counts run an order
-of magnitude above intuition. Everything downstream is sized from this report.
-"""
+"""Measure a Synthea output directory (row counts, Parquet size, notes) as a markdown report."""
 
 from __future__ import annotations
 
@@ -25,11 +20,7 @@ def measure_file(con: duckdb.DuckDBPyConnection, path: Path) -> dict:
 
 
 def parquet_bytes(con: duckdb.DuckDBPyConnection, path: Path, tmp_dir: Path) -> int:
-    """Size of the same data as Parquet.
-
-    Delta stores Parquet, so raw CSV bytes overestimate lakehouse storage
-    several-fold. Quota planning needs this number, not the CSV one.
-    """
+    """Size as Parquet, which Delta stores; CSV bytes overstate it several-fold."""
     out = tmp_dir / f"{path.stem}.parquet"
     con.read_csv(str(path), header=True).write_parquet(str(out))
     return out.stat().st_size
@@ -48,13 +39,7 @@ def distinct_codes(con: duckdb.DuckDBPyConnection, path: Path, code_col: str = "
 
 
 def note_stats(notes_dir: Path) -> dict:
-    """Count, disk size and character-length spread of the clinical notes.
-
-    Bytes are here because the notes outweigh every entity CSV combined and
-    phase 3 reads all of them, so a quota estimate that omits them is wrong.
-    Max is here because the mean understates it by an order of magnitude, and
-    it is the max that sizes the context window a de-identification model needs.
-    """
+    """Count, disk size and length spread of the notes; the max sizes a model's context window."""
     files = [p for p in notes_dir.iterdir() if p.is_file()] if notes_dir.is_dir() else []
     lengths = [len(p.read_text(encoding="utf-8", errors="replace")) for p in files]
     if not lengths:

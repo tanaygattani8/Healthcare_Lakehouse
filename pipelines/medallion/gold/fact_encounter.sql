@@ -1,10 +1,7 @@
--- One row per visit, with its dates as keys into dim_date and its money as
--- DECIMAL. Doubles added in a different order give a different last digit;
--- decimals do not, so any engine totals these the same (phase 4, track B).
+-- One row per visit; money as DECIMAL so every engine totals it the same.
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.fact_encounter (
-    -- A NULL condition is a violation (E57), so the allowed NULLs are spelled out.
-    -- An open visit (no stop time) has no duration.
+    -- NULL conditions are violations (E57), so allowed NULLs are spelled out.
     CONSTRAINT duration_not_negative EXPECT (duration_hours IS NULL OR duration_hours >= 0) ON VIOLATION FAIL UPDATE,
     -- patient_paid is total minus coverage: negative means an insurer paid more than the bill.
     CONSTRAINT coverage_not_above_bill EXPECT (patient_paid IS NULL OR patient_paid >= 0) ON VIOLATION FAIL UPDATE

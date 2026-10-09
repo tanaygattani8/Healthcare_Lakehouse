@@ -1,7 +1,4 @@
-# The app's look, "layer metals": the medallion's bronze, silver and gold are
-# the accents, on paper (light) or the pipeline map's night canvas (dark).
-# Streamlit reads this from the repo root, locally and on Community Cloud.
-# app/ui.py holds the same colours for the parts Streamlit does not draw.
+# "Layer metals" theme; app/ui.py holds the same colours.
 
 [client]
 toolbarMode = "minimal"

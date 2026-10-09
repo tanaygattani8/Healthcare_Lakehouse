@@ -1,5 +1,4 @@
--- Phase 5: one row per contestant per question per run. Verdicts only:
--- no result values are ever stored (spec §4).
+-- Phase 5: one verdict per contestant, question and run; never result values.
 CREATE TABLE IF NOT EXISTS healthcare_dev.ops.eval_run (
     run_id         STRING,
     set_name       STRING,

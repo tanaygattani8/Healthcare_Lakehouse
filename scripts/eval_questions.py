@@ -1,9 +1,4 @@
-"""The eval question files: load, validate, and prove the test set unedited.
-
-A question file is a YAML list. Each item: id, tier (1-4), question,
-answer_sql (tiers 1-3 only), ordered (optional, default false). Tier 4 means
-"should refuse": gold cannot or must not answer it, so it has no answer SQL.
-"""
+"""Load and validate eval question files and prove the test set unedited; tier 4 must refuse."""
 
 from __future__ import annotations
 
@@ -47,8 +42,7 @@ def load(path: Path) -> list[Question]:
 
 
 def fingerprint(path: Path) -> str:
-    # Line endings normalised: git on Windows may check the file out as CRLF,
-    # and a checkout is not an edit.
+    # Normalise line endings: a CRLF checkout is not an edit.
     return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 

@@ -1,7 +1,5 @@
 # Databricks notebook source
-# Phase 6 drift (spec §6): training against 2020-2026. It covers feature
-# spread, champion scores and the flag rate per year, and the readmission
-# rate. Appends one batch per run to ml.drift_report (decision P-h).
+# Phase 6 drift: training vs 2020-2026, appended as one batch per run to ml.drift_report.
 
 # COMMAND ----------
 

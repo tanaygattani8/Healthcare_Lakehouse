@@ -1,6 +1,4 @@
-"""Streamlit deploys the app with app/requirements.txt; CI tests with the
-root requirements.txt. Every app pin must be the root's pin, or CI tests a
-different stack from the one that ships (phase 10; the note after D26)."""
+"""Every app/requirements.txt pin must equal the root pin CI tests with."""
 import re
 from pathlib import Path
 

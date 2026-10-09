@@ -1,8 +1,4 @@
-"""Phase 5 probe P2: can a laptop script ask Genie a question and read back
-the SQL it wrote? Kept as a record.
-
-    .venv/Scripts/python.exe -m scripts.probe_genie <space_id>
-"""
+"""Phase 5 probe P2, kept as a record: ask Genie a question and read back its SQL."""
 
 from __future__ import annotations
 

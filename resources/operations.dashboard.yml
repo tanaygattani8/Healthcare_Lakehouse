@@ -4,7 +4,5 @@ resources:
       display_name: "Operations overview"
       warehouse_id: 21b0eda27be403b7
       file_path: ../dashboards/operations.lvdash.json
-      # Where the dashboard was first created (phase 8, Task 6). The bundle's
-      # default folder differs, and a folder change makes deploy recreate the
-      # dashboard with a new id and URL.
+      # The original folder: changing it makes deploy recreate the dashboard with a new URL.
       parent_path: /Users/${workspace.current_user.userName}

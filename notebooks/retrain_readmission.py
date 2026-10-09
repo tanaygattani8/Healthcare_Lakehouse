@@ -1,10 +1,5 @@
 # Databricks notebook source
-# Phase 9 (spec §2-§6): one cursor of retraining on drift. Told "today is
-# as_of", it judges the "all" champion's flag rate on the year before against
-# the workload budget. If it is off budget, it builds a new-cutoff and a
-# retrained challenger, promotes the simpler one that passes, and appends one
-# row to ml.retrain_history. mode=replay writes only to the sandbox
-# (replay_<year> aliases); mode=live may move `champion`.
+# Phase 9: one retraining cursor; replay writes only to the sandbox, live may move `champion`.
 
 # COMMAND ----------
 
@@ -42,8 +37,7 @@ from scripts import retrain as rt
 C = "healthcare_dev"
 NAME = f"{C}.ml.readmission_{rt.POPULATION}"
 HISTORY = f"{C}.ml.retrain_history"
-# The same list as train_readmission.py (E56): skops refuses any type it is
-# not told to trust, and these come from our own pipeline.
+# Same trusted types as train_readmission.py (E56).
 TRUSTED_TYPES = ["numpy.dtype", "sklearn.compose._column_transformer._RemainderColsList",
                  "sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor"]
 mlflow.set_registry_uri("databricks-uc")
@@ -121,8 +115,7 @@ if triggered:
     cut = rt.flag_rate(champion_check, cut_threshold)
     cut_passes = rt.on_budget(cut, target)
 
-    # 4b. Retrain: the champion's settings on the TRAIN_YEARS of stays admitted
-    # before the check window whose label is known by as_of (D80).
+    # 4b. Retrain on TRAIN_YEARS of stays before the window, labels known by as_of (D80).
     new_admit_before, new_discharged_by = str(w["check"][0]), str(rt.labels_known_by(as_of))
     new_admit_from = str(rt.add_years(w["check"][0], -rt.TRAIN_YEARS))
     train = signals[rt.trained_on(signals, new_admit_before, new_discharged_by,
@@ -149,8 +142,7 @@ if triggered:
 
 # COMMAND ----------
 
-# 6. MLflow, then promotion (spec §2.6), then the history row last (spec §5):
-# a crash before the row leaves a spare version, never a decision without a record.
+# 6. MLflow, promotion, then the history row last: a crash never leaves an unrecorded decision.
 outcome = row["outcome"]
 new_version = None
 with mlflow.start_run(run_name=f"retrain-{mode}-{as_of}") as run:

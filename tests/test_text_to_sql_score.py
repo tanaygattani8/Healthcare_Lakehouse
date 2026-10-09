@@ -72,10 +72,7 @@ def test_answer_column_found_in_a_wide_result():
 
 
 def test_wide_result_scoring_grows_linearly_not_quadratically():
-    # A 5 s clock limit failed on a busy machine: the work takes 1.8 s on a
-    # quiet one. Two sizes timed on the same machine slow down together, so
-    # their ratio does not flake. 1,000 to 10,000 rows measured 8.6x; linear
-    # work is ~10x, quadratic ~100x (phase 10).
+    # A ratio of two timed sizes doesn't flake: 10x rows is ~10x linear, ~100x quadratic.
     expected = [(i, i * 2, i * 3, i * 4) for i in range(10_000)]
     actual = [(0, i * 4, 1, i, 2, i * 3, 3, i * 2) for i in range(10_000)]
 

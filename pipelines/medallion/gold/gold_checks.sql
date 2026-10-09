@@ -1,14 +1,4 @@
--- Cross-table gates (phase 7, D73). One row of violation counts; every
--- column must be 0, or the update fails. Each query moved here from
--- sql/check_gold.sql, except events_encounters_off (added for E58).
---
--- Its limit: this runs after the tables it reads, so when it fails they have
--- already been replaced. It turns a quietly wrong build into a failed update
--- (red in Airflow); it cannot roll anything back. Row gates, on each table,
--- are the ones that protect a table.
---
--- <=> 0, not = 0: a NULL expectation is a violation in Lakeflow (E57), and
--- <=> makes a NULL count read as a violation explicitly. Keep every gate NULL-safe.
+-- Cross-table gates (D73): one row of counts, each must be <=> 0 (NULL-safe, E57); fails the update, can't roll back.
 
 CREATE OR REFRESH PRIVATE MATERIALIZED VIEW gold_checks (
     CONSTRAINT unknown_organization EXPECT (unknown_organization <=> 0) ON VIOLATION FAIL UPDATE,
@@ -76,8 +66,7 @@ signals AS (
     SELECT count(*) AS n, count(DISTINCT patient_id, stay_no) AS keys
     FROM ${catalog}.gold.readmission_signals
 ),
--- The statin rule, both ways (D57). A "statin" medication the rule misses
--- fails here: a brand not in measure_code.
+-- The statin rule both ways (D57): a statin brand missing from measure_code fails here.
 statin AS (
     SELECT count_if(lower(m.source_description) LIKE '%nystatin%' AND hit.code IS NOT NULL)
                                                                        AS nystatin_counted,
@@ -89,8 +78,7 @@ statin AS (
      AND lower(m.source_description) RLIKE concat('\\b', hit.code, '\\b')
     WHERE lower(m.source_description) LIKE '%statin%'
 ),
--- D68's window starts the day before admission. That is only safe if no
--- heart operation on that day belongs to the stay before.
+-- D68's window starts the day before admission: no heart operation then may belong to the stay before.
 surgery AS (
     SELECT count(*) AS surgery_from_previous_stay
     FROM ${catalog}.gold.readmission_events s
@@ -128,10 +116,7 @@ SELECT u.unknown_organization, u.unknown_provider, u.unknown_payer,
        sg.n - sg.keys                                            AS signals_duplicate_keys,
        st.nystatin_counted, st.statin_missed,
        su.surgery_from_previous_stay,
-       -- Gold must carry no governed tag. It is not de-identified (patient_id,
-       -- exact dates: as private as silver, D60), but a schema mask on it would
-       -- rewrite the dates every readmission window needs; it is published
-       -- only as counts (D63, D81).
+       -- Gold carries no governed tag: masks would rewrite the dates it needs; published as counts only (D60, D63).
        (SELECT count(*) FROM ${catalog}.information_schema.column_tags
         WHERE schema_name = 'gold')                              AS gold_tagged_columns,
        -- Every hospital encounter sits in exactly one stay (E58 broke this).

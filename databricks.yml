@@ -62,14 +62,11 @@ resources:
       configuration:
         landing_path: ${var.landing_path}
         batch_id: manual
-        # Silver publishes to a second schema, so the code needs the catalog
-        # name. Passed as config, not hardcoded in the SQL.
+        # Silver publishes to a second schema, so the catalog is passed as config.
         catalog: ${var.catalog}
 
 
-# One target. A prod target was validated in CI but never deployed: Free
-# Edition runs one pipeline, and everything outside it (notebooks, SQL, the
-# dashboard) names healthcare_dev directly, so it was a claim, not a split (D79).
+# One target: Free Edition runs one pipeline, so prod was a claim, not a split (D79).
 targets:
   dev:
     default: true

@@ -82,8 +82,7 @@ def test_follow_up_is_shown_but_never_at_discharge():
     assert row["at_discharge"] is False
 
 
-# The counts below are made up: real ones from a hidden level would undo
-# its suppression for anyone reading the repo (review I2).
+# Made-up counts: real hidden ones would undo their suppression.
 
 def test_few_readmissions_are_hidden_even_in_a_big_level():
     row = level_row("age_band", "80+", Side(400, 6, 6), Side(9000, 150, 130))
@@ -118,9 +117,7 @@ def test_a_lone_hidden_level_takes_a_second_one_with_it():
 
 
 def test_the_complement_prefers_a_level_with_readmissions():
-    # Only 80+ is small. Hiding 0-17 (no readmissions) with it would leave
-    # 186 - 120 - 60 = 6 to subtraction, so the smallest level with
-    # readmissions, 65-79, is hidden instead.
+    # Hiding 0-17 (no readmissions) would leave 6 to subtraction, so 65-79 goes.
     rows = complete_suppression(_rows(
         "age_band", [("0-17", 800, 0), ("45-64", 4000, 120), ("65-79", 3000, 60), ("80+", 1600, 6)],
         total=Side(9400, 186, 160)))
@@ -129,9 +126,7 @@ def test_the_complement_prefers_a_level_with_readmissions():
 
 
 def test_hidden_levels_that_sum_to_1_to_10_take_the_other_level_with_them():
-    # The shape the audit found (D79): four admit reasons hidden, and
-    # 140 - 71 - 59 left exactly 10 readmissions to subtraction. "other" is
-    # hidden next, not the bypass level the story quotes.
+    # The audit's shape (D79): hidden reasons left 10 readmissions; "other" goes next.
     rows = complete_suppression(_rows("admit_reason_group", [
         ("other", 4238, 71), ("cabg", 606, 59), ("a", 2000, 4), ("b", 1900, 3),
         ("c", 1000, 2), ("d", 980, 1)], total=Side(10724, 140, 127)))
@@ -140,8 +135,7 @@ def test_hidden_levels_that_sum_to_1_to_10_take_the_other_level_with_them():
 
 
 def test_hidden_levels_holding_11_or_more_need_no_more():
-    # 80+ and 18-44 are hidden; together they hold 1,600 stays and 13
-    # readmissions, which subtraction may give back.
+    # 80+ and 18-44 hidden together hold 1,600 stays and 13 readmissions.
     rows = _rows("age_band", [("0-17", 800, 0), ("45-64", 4000, 120), ("65-79", 3000, 45),
                               ("80+", 1595, 8), ("18-44", 5, 5)], total=Side(9400, 178, 160))
     assert [r["suppressed"] for r in complete_suppression(rows)] == [

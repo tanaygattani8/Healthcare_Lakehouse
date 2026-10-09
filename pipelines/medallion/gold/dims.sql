@@ -1,5 +1,4 @@
--- Reference tables. Built from bronze because silver never modelled them:
--- nothing upstream needed providers until gold asked "who saw them".
+-- Reference tables, from bronze: silver never modelled them.
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.dim_date
 COMMENT "One row per calendar day the encounters span. date_key is yyyymmdd."

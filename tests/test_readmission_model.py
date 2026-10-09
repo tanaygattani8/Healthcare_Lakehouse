@@ -93,9 +93,7 @@ def test_ties_are_broken_by_input_order():
 
 
 def test_bootstrap_resamples_patients_not_stays():
-    # 20 readmitted stays of one patient: the model catches them, the rule
-    # does not. 80 single-stay patients both score alike. Resampling that
-    # patient as one unit must swing the difference more than 20 strangers.
+    # One patient's 20 readmissions resampled as a unit must swing more than 20 strangers.
     y = np.r_[np.ones(20), np.tile([1, 0, 0, 0, 0, 0, 0, 0], 10)]
     model = np.r_[np.ones(20), np.linspace(0, 0.5, 80)]
     rule = np.r_[np.zeros(20), np.arange(80) < 30].astype(int)
@@ -107,9 +105,7 @@ def test_bootstrap_resamples_patients_not_stays():
 
 
 def test_bootstrap_flags_as_many_stays_as_the_rule_in_each_resample():
-    # A model that ranks exactly like the rule must tie it in every resample.
-    # Rescaling one k to each resample's size (the old P-f) moved the rule off
-    # its own flag count and broke this.
+    # Ranking exactly like the rule must tie it in every resample.
     rng = np.random.default_rng(3)
     y = rng.random(300) < 0.1
     rule = (rng.random(300) < 0.25).astype(int)
@@ -204,8 +200,7 @@ def test_evaluate_rows():
 
 
 def test_patient_resamples_draws_what_the_bootstrap_always_drew():
-    # The loop bootstrap_difference had before phase 9, written out: the
-    # extraction must not change a single draw (D71's intervals rest on them).
+    # The pre-phase-9 loop: extraction must not change a single draw.
     groups = np.array(["a", "b", "a", "c", "b", "d", "e", "a"])
     _, patient = np.unique(groups, return_inverse=True)
     order = np.argsort(patient, kind="stable")

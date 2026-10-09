@@ -1,9 +1,4 @@
--- One row per hospital STAY, CMS-like, simplified. Every exclusion is its own
--- column, never a hidden WHERE, so a reader can see why a stay was dropped.
---
--- Days are calendar days in America/Chicago, where Synthea generated the
--- data (D35); silver stores UTC, and an evening discharge in Chicago is the
--- next day in UTC.
+-- One row per hospital stay, CMS-like; every exclusion its own column; Chicago calendar days (D35).
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_events (
     -- Every stay is either an index stay or excluded for a named reason.
@@ -26,9 +21,7 @@ WITH inp AS (
     WHERE readmission_role = 'index_eligible'
 ),
 
--- A new stay begins only if this encounter starts on a later day than every
--- earlier one ended. max() over all earlier rows, not lag(): a long stay can
--- swallow several short ones, and lag() only sees the one just before.
+-- A new stay starts only after every earlier encounter ended: max(), not lag().
 marked AS (
     SELECT *,
            CASE WHEN max(stop_day) OVER w IS NULL OR start_day > max(stop_day) OVER w
@@ -48,8 +41,7 @@ numbered AS (
 
 -- Encounters with a procedure that is always planned: cancer treatment (D64).
 planned_encounter AS (
-    -- GROUP BY with a count, not SELECT DISTINCT: inside the pipeline a DISTINCT
-    -- CTE that is joined afterwards stopped removing duplicates (E58, E59).
+    -- GROUP BY, not DISTINCT: a joined DISTINCT CTE stopped deduplicating in the pipeline (E58, E59).
     SELECT pr.encounter_id AS planned_encounter_id, count(*) AS cancer_procedures
     FROM ${catalog}.silver.procedure pr
     JOIN ${catalog}.gold.planned_procedure pp ON pp.code = pr.source_code
@@ -57,13 +49,11 @@ planned_encounter AS (
     GROUP BY pr.encounter_id
 ),
 
--- "First" is by start time, then id: two encounters can start at the same
--- moment, and a tie broken at random would differ between engines.
+-- "First" by start time, then id, so engines break ties alike.
 stays AS (
     SELECT patient_id, stay_no,
            min_by(encounter_id, struct(started_at, encounter_id))       AS first_encounter_id,
-           -- DISTINCT, not count(*): in the pipeline the planned_encounter join
-           -- multiplied cancer-treatment stays by their procedure rows (E58).
+           -- DISTINCT: the join multiplied stays by procedure rows (E58).
            count(DISTINCT encounter_id)                                 AS encounters_in_stay,
            min(started_at)                                              AS admitted_at,
            max(stopped_at)                                              AS discharged_at,
@@ -76,12 +66,7 @@ stays AS (
     GROUP BY patient_id, stay_no
 ),
 
--- Stays with a scheduled heart operation (D68), by day, not by encounter:
--- Synthea records a CABG on the ambulatory visit just before the inpatient
--- stay, so the window starts the day before admission. An emergency
--- operation in the window makes the stay unplanned.
--- ponytail: a surgery on the previous stay's discharge day would also land
--- in the window; no stay here starts the day after a heart operation ended one.
+-- Scheduled heart operations from the day before admission (D68); an emergency one makes the stay unplanned.
 planned_surgery AS (
     SELECT s.patient_id, s.stay_no
     FROM stays s
@@ -95,10 +80,7 @@ planned_surgery AS (
     HAVING NOT max(pp.kind = 'emergency_heart_surgery')
 ),
 
--- Planned follows the reason the stay BEGAN with: an emergency admission
--- that later merges with a planned encounter is still an emergency. The
--- exceptions are cancer treatment (D64) and scheduled heart surgery (D68),
--- which are planned wherever they fall.
+-- Planned follows the first reason, except cancer treatment (D64) and scheduled heart surgery (D68).
 stays_p AS (
     SELECT s.*, pr.reason_description IS NOT NULL OR s.cancer_treatment
                 OR ps.stay_no IS NOT NULL AS is_planned
@@ -107,9 +89,7 @@ stays_p AS (
     LEFT JOIN planned_surgery ps ON ps.patient_id = s.patient_id AND ps.stay_no = s.stay_no
 ),
 
--- Phase 8: the claim cost of every stay, not only index stays. Moved here
--- unchanged from readmission_signals, which now reads it, so the dashboard
--- and the model share one definition.
+-- Phase 8: claim cost of every stay, shared by the dashboard and the model.
 stay_cost AS (
     SELECT s.patient_id, s.stay_no, sum(f.total_claim_cost) AS stay_claim_cost
     FROM stays s
@@ -121,8 +101,7 @@ stay_cost AS (
     GROUP BY s.patient_id, s.stay_no
 ),
 
--- The end of the data: the last visit of any kind, not just the last
--- hospital stay (the gate used the latter, which ends the data early).
+-- Data ends at the last visit of any kind.
 data_end AS (
     SELECT to_date(from_utc_timestamp(max(started_at), 'America/Chicago')) AS last_day
     FROM ${catalog}.silver.encounter

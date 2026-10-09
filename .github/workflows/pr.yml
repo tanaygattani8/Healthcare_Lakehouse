@@ -1,16 +1,6 @@
 name: PR checks
 
-# Twice, broken code reached main because a check that would have caught it was
-# never run (errors.md E16, E22). This removes the option of forgetting.
-#
-# Until phase 10 it was an alarm: it ran after commits had already landed on
-# main (E33). Since D78 it is a gate. Branch protection on main requires the
-# three jobs below, by these exact names (lint, bundle, dags), admins included,
-# so nothing reaches main without them green. Renaming a job means updating
-# branch protection in the same change, or every pull request waits forever
-# for a check that never comes.
-#
-# push to main re-checks the squashed commit, so main's status stays true.
+# The gate for main (D78): branch protection requires lint, bundle and dags by these names (E16, E22, E33).
 
 on:
   push:
@@ -35,8 +25,7 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Bare, never piped. E16 was `ruff check . | tail`, where the pipe
-      # replaced the failing exit code and the gate reported success.
+      # Bare, never piped: a pipe once hid the failing exit code (E16).
       - run: ruff check .
 
       - run: pytest -q
@@ -46,14 +35,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pinned by commit, not @main: this job holds the workspace token, and a
-      # branch can be moved under it. v1.20.0, the release #6 passed with (D81).
+      # Pinned by commit: this job holds the workspace token (D81).
       - uses: databricks/setup-cli@9b64c94a6d2b2e830592d80e9f14c26d32b42ad7  # v1.20.0
 
-      # A personal access token is the Free Edition degradation. A service
-      # principal with scoped permissions is what production uses, and OIDC is
-      # the upgrade path. Noted here because this file is where whoever
-      # inherits it will care.
+      # A PAT is the Free Edition stand-in for a service principal or OIDC.
       - name: Validate the bundle
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
@@ -61,13 +46,9 @@ jobs:
         run: |
           databricks bundle validate -t dev
 
-      # Deliberately absent: `bundle deploy`. A deploy updates the workspace's
-      # one pipeline; that stays a deliberate step on the laptop.
+      # No `bundle deploy`: deploying stays a deliberate laptop step.
 
-  # The Airflow DAGs, loaded by the same image the laptop runs
-  # (orchestration/Dockerfile). ruff only lints them as Python; this catches a
-  # wrong Airflow import, a bad Param, or a DAG that stops loading. The
-  # pipeline id is a dummy: parsing reads the variable and calls nothing.
+  # DAGs load in the real Airflow image; the pipeline id is a dummy.
   dags:
     runs-on: ubuntu-latest
     steps:

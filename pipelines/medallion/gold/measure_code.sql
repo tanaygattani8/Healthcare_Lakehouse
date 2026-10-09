@@ -1,12 +1,10 @@
--- Every code the care-gap measures use, in one place, so a chart never copies
--- a code list and two places never disagree. Chosen from probe P4 (D57).
+-- Every care-gap code in one place (D57).
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.measure_code
 COMMENT "Every code the care-gap measures use. The one place they are defined."
 TBLPROPERTIES ("quality" = "gold")
 AS SELECT * FROM VALUES
-    -- Diabetes: the plain code covers only 79 patients; 87 more have only a
-    -- complication "due to type 2 diabetes".
+    -- Diabetes complications too: the plain code covers only 79 patients.
     ('diabetes_hba1c', 'denominator', 'condition',  '44054006',        'Diabetes mellitus type 2'),
     ('diabetes_hba1c', 'denominator', 'condition',  '127013003',       'Disorder of kidney due to diabetes mellitus'),
     ('diabetes_hba1c', 'denominator', 'condition',  '90781000119102',  'Microalbuminuria due to type 2 diabetes mellitus'),
@@ -27,8 +25,7 @@ AS SELECT * FROM VALUES
     ('statin_therapy', 'denominator', 'condition',  '401303003',       'Acute ST segment elevation myocardial infarction'),
     ('statin_therapy', 'denominator', 'condition',  '401314000',       'Acute non-ST segment elevation myocardial infarction'),
     ('statin_therapy', 'denominator', 'condition',  '230690007',       'Stroke'),
-    -- Statins by generic name, matched as whole words: 'nystatin' is an
-    -- antifungal and must not count (none in this data, D57).
+    -- Whole words: 'nystatin' is an antifungal (D57).
     ('statin_therapy', 'numerator',   'medication', 'simvastatin',     'statin'),
     ('statin_therapy', 'numerator',   'medication', 'atorvastatin',    'statin'),
     ('statin_therapy', 'numerator',   'medication', 'rosuvastatin',    'statin'),

@@ -1,10 +1,5 @@
--- The contract (phase 7, D73). Every column is declared with today's type,
--- copied from DESCRIBE TABLE, so a rename or retype fails the build instead
--- of breaking the model's saved input schema at scoring. The row gates below
--- fail the update; the table then keeps its last good version. A condition
--- that comes out NULL counts as a violation (E57): write each one NULL-safe.
--- Keep each CONSTRAINT on one line: tests/test_gold_contract.py reads this
--- list line by line.
+-- The contract (D73): declared types fail a retype at build; NULL-safe row gates (E57).
+-- Keep each CONSTRAINT on one line: tests/test_gold_contract.py reads them line by line.
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_signals (
     patient_id STRING,
     stay_no BIGINT,
@@ -58,8 +53,7 @@ WITH stays AS (
     FROM ${catalog}.gold.readmission_events
 ),
 
--- Stay cost and length of stay come from readmission_events (phase 8),
--- which computes them for every stay.
+-- Stay cost and length come from readmission_events.
 idx AS (
     SELECT *
     FROM stays
@@ -103,8 +97,7 @@ prior_emergency AS (
 ),
 
 followup AS (
-    -- GROUP BY with a count, not SELECT DISTINCT: inside the pipeline a DISTINCT
-    -- CTE that is joined afterwards stopped removing duplicates (E58, E59).
+    -- GROUP BY, not DISTINCT: a joined DISTINCT CTE stopped deduplicating in the pipeline (E58, E59).
     SELECT i.patient_id, i.stay_no, count(*) AS followup_visits
     FROM idx i
     JOIN ${catalog}.gold.fact_encounter f
@@ -126,9 +119,7 @@ return_cost AS (
      AND datediff(b.admit_day, i.discharge_day) = i.days_to_unplanned_return
 ),
 
--- Phase 6 (spec §2): a coronary bypass, emergency included, from the day
--- before admission to discharge. A feature and the population split, not a
--- planned-care rule, so planned_procedure is unchanged.
+-- Coronary bypass from the day before admission: a feature and the population split.
 bypass AS (
     SELECT i.patient_id, i.stay_no, count(*) AS bypass_procedures
     FROM idx i
@@ -149,8 +140,7 @@ last_discharge AS (
     GROUP BY i.patient_id, i.stay_no, i.admit_day
 ),
 
--- An emergency visit on the admit day or the day before (14.9% of index
--- stays, phase 6 probe P3).
+-- An emergency visit on the admit day or the day before.
 via_emergency AS (
     SELECT i.patient_id, i.stay_no, count(*) AS emergency_visits
     FROM idx i
@@ -208,8 +198,7 @@ cut AS (
     FROM joined
 ),
 
--- The five commonest admit reasons keep their name; the rest are "other".
--- Ties are broken by name, so every rebuild picks the same five.
+-- Top five admit reasons by count, ties by name; the rest are "other".
 top_reason AS (
     SELECT admit_reason,
            row_number() OVER (ORDER BY count(*) DESC, admit_reason) AS reason_rank
@@ -219,8 +208,7 @@ top_reason AS (
 
 SELECT j.patient_id,
        j.stay_no,
-       -- The stay's key. stay_no counts a patient's stays in order, so a late
-       -- earlier visit would renumber every later one; this id cannot move (D81).
+       -- The stay's stable key; stay_no can renumber (D81).
        j.first_encounter_id,
        j.admit_year,
        j.age_at_admit,

@@ -1,5 +1,4 @@
-"""The home page: the lakehouse as a transit map. Each station is a chapter,
-carries its headline number from the snapshots, and opens its page."""
+"""Home: the lakehouse as a transit map; each station is a chapter with its headline number."""
 
 import pandas as pd
 import streamlit as st
@@ -88,8 +87,7 @@ st.html(f"""
 <div class="lh-stand">One lakehouse, from raw synthetic health records to a model that was
 replayed for six years before it was trusted. Every station below is a chapter, and every
 number on the line is the one that chapter answers. Follow the line.</div>""")
-# st.html's sanitiser drops SVG; markdown with raw HTML keeps it, links included.
-# Its own scroll box: on a phone the map keeps a readable width (style.css, D81).
+# Markdown keeps the SVG that st.html's sanitiser drops; its own scroll box on phones (D81).
 st.markdown(f'<div class="lh-mapwrap">{svg}</div>', unsafe_allow_html=True)
 st.html(f'<div class="lh-toc">{toc}</div>')
 ui.colophon()

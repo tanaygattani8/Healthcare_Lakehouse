@@ -1,9 +1,4 @@
-"""Phase 9: retraining on drift, one cursor at a time (spec §2, §5).
-
-Pure Python, like readmission_model.py and drift.py, so every rule is
-tested on made-up rows (tests/test_retrain.py). The notebook
-retrain_readmission.py runs it on gold, told "today is as_of".
-"""
+"""Phase 9: retraining on drift, one cursor at a time; run by retrain_readmission.py."""
 
 from __future__ import annotations
 
@@ -24,8 +19,7 @@ FIRST_REPLAY = dt.date(2021, 1, 1)
 LAST_REPLAY = dt.date(2026, 1, 1)
 REPLAYS = LAST_REPLAY.year - FIRST_REPLAY.year + 1
 LABEL_DAYS = 30               # a stay's 30-day outcome is known 30 days after discharge
-# A retrain fits on this many years before its check window: phase 6's window
-# (2000-2019, D80) rolled forward, so no cursor trains on stays back to 1915.
+# Years of training before a check window: phase 6's 2000-2019 rolled forward (D80).
 TRAIN_YEARS = int(rm.PROD_FROM[:4]) - int(rm.TRAIN_FROM[:4])
 
 
@@ -54,9 +48,7 @@ def labelled(df: pd.DataFrame, as_of: dt.date) -> pd.Series:
 
 
 def trained_on(df: pd.DataFrame, admit_before, discharged_by, admit_from=None) -> pd.Series:
-    """The stays a model with these tags trained on. v2 has no tags; its
-    training is split()'s before D80: admit_before PROD_FROM, discharged_by
-    TRAIN_UNTIL, no admit_from. Versions since D80 carry train_admit_from."""
+    """The stays a model with these tags trained on; v2 predates train_admit_from (D80)."""
     admit = pd.to_datetime(df["admit_day"])
     picked = (admit < pd.Timestamp(admit_before)) & (
         pd.to_datetime(df["discharge_day"]) <= pd.Timestamp(discharged_by))
@@ -64,31 +56,25 @@ def trained_on(df: pd.DataFrame, admit_before, discharged_by, admit_from=None) -
 
 
 def budget(signals: pd.DataFrame) -> float:
-    """The workload budget (spec §2.2): the rule's flag rate on phase 6's
-    training stays, the share v2's cutoff was set to. Fixed for every cursor."""
+    """The workload budget: the rule's flag rate on phase 6's training stays."""
     train, _, _ = rm.split(rm.population(signals, POPULATION))
     return float(rm.rule_score(train).mean())
 
 
 def settings(source: Mapping[str, str]) -> tuple[str, dict]:
-    """A model's kind and settings from its MLflow params or version tags,
-    which are strings, cast back to the types in rm.GRID."""
+    """A model's kind and settings from string params, cast back to rm.GRID's types."""
     kind = source["kind"]
     return kind, {key: type(value)(source[key]) for key, value in rm.GRID[kind][0].items()}
 
 
 def scored_from(tags: Mapping[str, str]) -> str:
-    """The first admit day score_readmission scores for a champion: production,
-    or after its training if that ends later, so a retrained champion never
-    scores its own training stays (spec §3.3). ISO dates compare as text."""
+    """First admit day a champion scores, so it never scores its own training stays."""
     return max(tags.get("train_admit_before", rm.PROD_FROM), rm.PROD_FROM)
 
 
 def window_scores(model, fresh: Pipeline, trained: pd.DataFrame,
                   window: pd.DataFrame) -> np.ndarray:
-    """Scores for `window`, in its row order. Stays the model trained on get
-    out-of-fold scores from `fresh`, an unfitted copy with the same settings:
-    in-sample scores look surer than new stays will (D72, spec §2.4)."""
+    """Scores for `window`; stays the model trained on get out-of-fold scores (D72)."""
     score = pd.Series(model.predict_proba(rm.build_features(window, POPULATION))[:, 1],
                       index=window.index)
     seen = window.index.intersection(trained.index)
@@ -110,11 +96,7 @@ def on_budget(rate: dict, target: float) -> bool:
 
 
 def ranking_guard(y, challenger, champion, groups, n: int = 1000, seed: int = 0) -> str:
-    """"clearly worse" only if the whole 95% interval of the challenger's
-    average precision minus the champion's, resampling patients, is below
-    zero (spec §2.5). Resamples with no readmission have no average
-    precision and are skipped. At ~5 readmissions a year this catches a gross
-    failure, not a subtle one."""
+    """"clearly worse" only if the whole 95% interval of the AP difference is below zero."""
     y = np.asarray(y, bool)
     if not y.any():
         return "not judged"
@@ -133,8 +115,7 @@ def winner(cutoff_passes: bool, retrain_passes: bool) -> str:
 
 def order_problem(as_of: dt.date, mode: str,
                   done: list[tuple[dt.date, str]]) -> str | None:
-    """Why this run may not go ahead, or None (spec §5). `done` is every
-    (as_of, mode) already in ml.retrain_history."""
+    """Why this run may not go ahead, or None; `done` holds runs already recorded."""
     if (as_of, mode) in done:
         return f"{mode} {as_of} is already decided"
     replays = sorted(day for day, m in done if m == "replay")
@@ -149,9 +130,7 @@ def order_problem(as_of: dt.date, mode: str,
 
 
 def shifted_features(reference: pd.DataFrame, window: pd.DataFrame) -> list[str]:
-    """Features whose drift status is "shifted" in `window` against the stays
-    the champion trained on. They explain a trigger; they trigger nothing
-    (spec §2.3)."""
+    """Features "shifted" against the champion's training stays; they explain, never trigger."""
     x_ref = rm.build_features(reference, POPULATION)
     x_win = rm.build_features(window, POPULATION)
     kinds = {c: "number" if c in rm.NUMBERS else "flag" if c in rm.FLAGS else "category"

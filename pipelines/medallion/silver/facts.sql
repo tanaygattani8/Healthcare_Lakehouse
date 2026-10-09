@@ -1,11 +1,4 @@
--- The remaining six clinical fact tables, all following the shape proved by
--- condition.sql: typed view with a violations array, valid rows to silver,
--- failing rows kept whole in ops.
---
--- The encounter link is optional everywhere. 150,120 observations carry no
--- encounter at all (docs/silver-model-findings.md section 4); requiring it
--- would quarantine 6.75% of the largest table for no reason. The patient link
--- is the one that must hold.
+-- The other six fact tables in condition.sql's shape; the encounter link is optional, the patient link isn't.
 
 -- ---------------------------------------------------------------- observation
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.v_observation AS
@@ -146,9 +139,7 @@ AS SELECT * FROM ${catalog}.silver.v_immunization WHERE size(violations) > 0;
 
 
 -- -------------------------------------------------------------------- allergy
--- The only fact table whose codes span two vocabularies: 916 SNOMED rows and
--- 102 RxNorm. The join must use each row's own SYSTEM, normalised the same way
--- dim_code normalises it. Assuming one system here would misfile 102 rows.
+-- Codes span SNOMED and RxNorm: join on each row's own normalised SYSTEM.
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.v_allergy AS
 SELECT
     a.PATIENT                                 AS patient_id,

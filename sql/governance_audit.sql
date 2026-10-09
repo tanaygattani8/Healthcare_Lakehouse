@@ -1,23 +1,5 @@
--- Phase 3a — the audit view: who read PHI, and when.
---
--- Source is system.query.history rather than system.access.audit. Both exist
--- here (decision.md D41), but access.audit records catalog operations like
--- getTableById, which answers "was this object resolved" rather than "did a
--- person read this data". query.history carries the statement text and the
--- user who ran it.
---
--- The PHI table list is derived from column_tags rather than hardcoded, so
--- tagging a new table adds it to the audit automatically and nothing has to
--- be kept in step by hand.
---
--- ponytail: matches statement text by table name. Two known ceilings, both
--- worth knowing before quoting a number from this view:
---   * a query reading silver.patient through another view is not matched
---   * 'patient' is a substring of 'quarantine_patient', so a read of either
---     matches both rows. Counts here are an upper bound, not a census.
--- The structured alternative is access.audit's request_params, which is
--- precise and far less legible. Revisit if this view is ever used for
--- anything beyond demonstrating that auditing exists.
+-- Phase 3a audit view: who read PHI and when, from query.history (D41); PHI tables from column_tags.
+-- ponytail: matches statement text, so views are missed and counts are an upper bound.
 
 CREATE OR REPLACE VIEW healthcare_dev.ops.phi_access_audit
 COMMENT 'Statements that referenced a PHI-tagged table. Upper bound: matches on statement text.'

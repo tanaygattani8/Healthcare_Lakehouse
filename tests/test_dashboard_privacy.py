@@ -1,9 +1,4 @@
-"""Every number the dashboard shows goes through metrics.shown() (spec §5).
-
-Reads the exported dashboard, so a widget added in the UI cannot skip the
-rule unnoticed. Each dataset ends in `SELECT <items>` then `FROM final`
-(plan P-d). Each item is a dimension name, or one shown() call.
-"""
+"""Every number the exported dashboard shows goes through metrics.shown()."""
 import json
 import re
 from pathlib import Path
@@ -14,10 +9,7 @@ BOARD = Path(__file__).resolve().parents[1] / "dashboards/operations.lvdash.json
 SHOWN = "healthcare_dev.metrics.shown("
 DIMENSIONS = {"payer", "hospital", "visit_type", "visit_month", "admit_quarter",
               "measure", "measure_year"}
-# The filters each dataset must apply in its WHERE. A stay is always
-# inpatient, so stays take no visit_type. Readmissions use D70's wide periods
-# and care_gap has no hospital or payer, so those two take none (spec §4).
-# The filter lists hold names only.
+# Filters each dataset's WHERE must apply (stays: no visit_type; readmission and care_gap: none).
 PARAMS = {
     "payers": set(), "hospitals": set(), "visit_types": set(),
     "kpi_visits": {"payer", "hospital", "visit_type"},
@@ -62,9 +54,7 @@ def is_safe(item: str) -> bool:
     return False
 
 
-# Breakdowns shown beside their own total (the stays tile), so one hidden row
-# would come back by subtraction: their numbers must read privacy_n, the
-# protection-interval suppression (E61).
+# Breakdowns beside their total must use privacy_n, or subtraction gives a hidden row back (E61).
 SECONDARY = {"by_payer"}
 FILTER_LISTS = {"payers", "hospitals", "visit_types"}
 
@@ -74,8 +64,7 @@ def board() -> dict:
 
 
 def datasets() -> dict[str, str]:
-    """Each dataset's SQL with `--` comments removed, so a comment cannot
-    stand in for a filter."""
+    """Each dataset's SQL without `--` comments, so a comment can't stand in for a filter."""
     return {d["displayName"]: re.sub(r"--[^\n]*", "",
                                      "".join(d.get("queryLines") or [d.get("query", "")]))
             for d in board()["datasets"]}
@@ -125,8 +114,7 @@ def test_dataset_hides_small_cells(name):
 
 
 def test_widgets_show_rows_as_returned():
-    """An aggregating widget (SUM over rows) would rebuild totals around the
-    hidden cells; every widget reads the rows exactly as shown() left them."""
+    """No aggregating widget: summing rows would rebuild totals around hidden cells."""
     aggregated = [w["widget"]["name"]
                   for page in board()["pages"] for w in page["layout"]
                   for q in w["widget"].get("queries", [])

@@ -1,14 +1,4 @@
-"""Program 1: find things that LOOK like private details, given no names.
-
-The honest starting point. It cannot find names: there is no pattern that
-matches 'Lucius' but not 'Patient'. That gap is the finding, not a flaw.
-
-Dates it will find perfectly, and that is not to its credit either: every
-date-shaped string in these notes is a real patient date (decision.md D52).
-
-Runs locally on the test-set notes. Output: data/detections/regex.csv, which
-sql/load_detections.sql loads into ops.detection_span.
-"""
+"""Program 1: patterns shaped like private details; it can't find names (D52)."""
 
 from __future__ import annotations
 
@@ -21,17 +11,14 @@ from scripts import dbx
 NOTES = Path("synthea/output/notes")
 OUT = Path("data/detections/regex.csv")
 
-# Written for clinical notes in general, not tuned to these ones. ssn, zip and
-# contact never occur in Synthea notes (D50), so anything they match is a
-# false alarm — which is worth knowing.
+# Generic clinical patterns; ssn/zip/contact never occur here, so hits are false alarms (D50).
 PATTERNS = {
     "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
     "date": re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b"),
     "zip": re.compile(r"\b\d{5}(?:-\d{4})?\b"),
     "contact": re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]+\b|\b\d{3}-\d{3}-\d{4}\b"),
 }
-# Safe Harbor only covers ages over 89, so the number is kept and the rest
-# of "93 year-old" is not.
+# Safe Harbor only covers ages over 89: keep the number, not "year-old".
 AGE = re.compile(r"\b(\d{2,3}) year-old")
 
 

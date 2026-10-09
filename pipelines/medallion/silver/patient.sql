@@ -1,23 +1,6 @@
--- One row per patient.
---
--- silver.patient is the only published silver table with identifying
--- columns, and they are tagged and masked there (sql/governance_tags.sql).
--- bronze.br_patients holds the raw strings, tagged the same way, and the
--- quarantine copy in ops too (governance_quarantine.sql).
---
--- v_patient is a TEMPORARY VIEW, so nothing is stored. Published, it was an
--- untagged copy of every identifier beside the masked table. PRIVATE was
--- tried first and is not enough: the pipeline still stores a private view,
--- renamed bronze.__<pipeline id>_v_patient, with a backing table (D79).
---
--- The quarantine pattern used by every silver table:
---   v_<name>  -- typed, with a violations array (a temporary view for patient)
---   <name>    -- valid rows only, in silver
---   ops.quarantine_<name> -- failing rows kept whole, never deleted
---
--- Databricks has no built-in quarantine. EXPECT ... ON VIOLATION DROP ROW
--- deletes the row and keeps a count; the row itself is gone. Splitting the
--- typed view in two is how the row survives.
+-- One row per patient; identifiers tagged and masked (governance_tags.sql).
+-- v_patient is TEMPORARY so nothing is stored; PRIVATE still stored a copy (D79).
+-- Quarantine pattern: v_<name> typed with violations, <name> valid rows, ops.quarantine_<name> failures kept whole.
 
 CREATE TEMPORARY VIEW v_patient AS
 SELECT
