@@ -209,9 +209,17 @@ def pager(current: int) -> None:
 
 
 def colophon() -> None:
+    path = SNAPSHOTS / "manifest.parquet"
+    when = ""
+    if path.exists():
+        m = pd.read_parquet(path).iloc[0]
+        when = (f"Data through {m.data_through:%d %b %Y}; numbers published "
+                f"{m.captured_at:%d %b %Y}. ")
     st.html('<div class="lh-colophon">Synthetic data from Synthea: no real patients. '
             'Aggregates only, and any group of 1&ndash;10 stays or readmissions is hidden, with '
-            'whatever would give it back by subtraction. Built on Databricks Free Edition. '
+            'whatever would give it back by subtraction; chapter 2&rsquo;s k-anonymity table shows '
+            'group sizes as they are, since a size names no one. ' + when +
+            'Built on Databricks Free Edition. '
             # A new tab: GitHub refuses to load inside streamlit.app's frame.
             '<a href="https://github.com/tanaygattani8/Healthcare_Lakehouse" target="_blank" '
             'rel="noopener">The source and the decision log</a>.</div>')

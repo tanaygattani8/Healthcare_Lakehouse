@@ -10,7 +10,9 @@ COMMENT "One row per patient. No names, addresses or identifier numbers; age cap
 TBLPROPERTIES ("quality" = "gold")
 AS
 WITH data_end AS (
-    SELECT to_date(max(started_at)) AS last_day FROM ${catalog}.silver.encounter
+    -- A Chicago day, as everywhere else in gold (D81).
+    SELECT to_date(from_utc_timestamp(max(started_at), 'America/Chicago')) AS last_day
+    FROM ${catalog}.silver.encounter
 ),
 -- From fact_encounter, not silver: its money is already DECIMAL, so these
 -- totals equal the fact table's in any engine.

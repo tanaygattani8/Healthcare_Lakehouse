@@ -89,6 +89,7 @@ st.html(f"""
 replayed for six years before it was trusted. Every station below is a chapter, and every
 number on the line is the one that chapter answers. Follow the line.</div>""")
 # st.html's sanitiser drops SVG; markdown with raw HTML keeps it, links included.
-st.markdown(svg, unsafe_allow_html=True)
+# Its own scroll box: on a phone the map keeps a readable width (style.css, D81).
+st.markdown(f'<div class="lh-mapwrap">{svg}</div>', unsafe_allow_html=True)
 st.html(f'<div class="lh-toc">{toc}</div>')
 ui.colophon()

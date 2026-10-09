@@ -11,7 +11,7 @@ SELECT
                          SELECT * EXCEPT (key_copies, organization_id, payer_id, length_of_stay_days, stay_claim_cost) FROM healthcare_dev.gold.readmission_events)) AS events_only_in_pyspark;
 
 -- readmission_signals, the model's table, against its copy from before.
--- ops.signals_before is dropped by sql/phase8_cleanup.sql once this reads
+-- ops.signals_before is dropped by archive/sql/phase8_cleanup.sql once this reads
 -- 0, so this query is a record of phase 8 and fails if rerun.
 SELECT
   (SELECT count(*) FROM (SELECT * FROM healthcare_dev.gold.readmission_signals

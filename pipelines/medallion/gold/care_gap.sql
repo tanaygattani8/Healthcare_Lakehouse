@@ -1,6 +1,8 @@
 -- Three HEDIS-style measures: who should get something (denominator), who
 -- got it (numerator), who is excused (one column per exclusion). Measured
--- over the last complete calendar year (probe P5: 2025).
+-- over the last complete calendar year (probe P5: 2025). Days are calendar
+-- days in America/Chicago, as in readmission_events: in UTC, 54 tests and
+-- prescriptions near New Year fell in the wrong year (D81).
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.care_gap (
     -- A duplicated patient-measure fails here, before the table is replaced (E59).
@@ -10,10 +12,11 @@ COMMENT "One row per patient per measure per year. gap = should have had it, was
 TBLPROPERTIES ("quality" = "gold")
 AS
 WITH period AS (
-    SELECT year(max(started_at)) - 1                     AS measure_year,
-           make_date(year(max(started_at)) - 1, 1, 1)    AS period_start,
-           make_date(year(max(started_at)) - 1, 12, 31)  AS period_end
-    FROM ${catalog}.silver.encounter
+    SELECT year(last_day) - 1                     AS measure_year,
+           make_date(year(last_day) - 1, 1, 1)    AS period_start,
+           make_date(year(last_day) - 1, 12, 31)  AS period_end
+    FROM (SELECT to_date(from_utc_timestamp(max(started_at), 'America/Chicago')) AS last_day
+          FROM ${catalog}.silver.encounter)
 ),
 
 -- Had the condition at some point during the year, and was alive when it
@@ -40,7 +43,8 @@ hba1c_done AS (
     JOIN ${catalog}.gold.measure_code mc
       ON mc.measure = 'diabetes_hba1c' AND mc.role = 'numerator' AND mc.code = o.source_code
     CROSS JOIN period pr
-    WHERE to_date(o.observed_at) BETWEEN pr.period_start AND pr.period_end
+    WHERE to_date(from_utc_timestamp(o.observed_at, 'America/Chicago'))
+          BETWEEN pr.period_start AND pr.period_end
     GROUP BY o.patient_id
 ),
 
@@ -53,7 +57,8 @@ bp_pairs AS (
     FROM ${catalog}.silver.observation o
     CROSS JOIN period pr
     WHERE o.source_code IN ('8480-6', '8462-4')
-      AND to_date(o.observed_at) BETWEEN pr.period_start AND pr.period_end
+      AND to_date(from_utc_timestamp(o.observed_at, 'America/Chicago'))
+          BETWEEN pr.period_start AND pr.period_end
     GROUP BY o.patient_id, o.observed_at
     HAVING systolic IS NOT NULL AND diastolic IS NOT NULL
 ),
@@ -72,8 +77,9 @@ statin_taken AS (
       ON mc.measure = 'statin_therapy' AND mc.role = 'numerator'
      AND lower(m.source_description) RLIKE concat('\\b', mc.code, '\\b')
     CROSS JOIN period pr
-    WHERE to_date(m.started_at) <= pr.period_end
-      AND (m.stopped_at IS NULL OR to_date(m.stopped_at) >= pr.period_start)
+    WHERE to_date(from_utc_timestamp(m.started_at, 'America/Chicago')) <= pr.period_end
+      AND (m.stopped_at IS NULL
+           OR to_date(from_utc_timestamp(m.stopped_at, 'America/Chicago')) >= pr.period_start)
     GROUP BY m.patient_id
 ),
 
@@ -81,7 +87,8 @@ in_hospice AS (
     SELECT e.patient_id, count(*) AS hospice_visits
     FROM ${catalog}.silver.encounter e CROSS JOIN period pr
     WHERE e.encounter_class = 'hospice'
-      AND to_date(e.started_at) BETWEEN pr.period_start AND pr.period_end
+      AND to_date(from_utc_timestamp(e.started_at, 'America/Chicago'))
+          BETWEEN pr.period_start AND pr.period_end
     GROUP BY e.patient_id
 ),
 

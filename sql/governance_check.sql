@@ -45,7 +45,7 @@ WHERE tag_name = 'phi_category'
 GROUP BY schema_name, table_name
 ORDER BY schema_name;
 
--- CHECK 3 — a PHI column with no tag, anywhere in the catalog. CHECKs 1 and 2
+-- CHECK 3 â€” a PHI column with no tag, anywhere in the catalog. CHECKs 1 and 2
 -- only see columns someone tagged; a copy nobody tagged is invisible to them.
 -- That is how silver.v_patient and bronze.br_patients sat unmasked beside the
 -- masked table for six phases (D79). Expect no rows.

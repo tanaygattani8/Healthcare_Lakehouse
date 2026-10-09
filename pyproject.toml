@@ -13,6 +13,7 @@ select = ["E", "F", "I", "UP", "B"]
 # imports belong in the cell that uses them because a cell can be run alone.
 # E501 is on, so a genuinely unreadable line is still caught.
 "notebooks/**" = ["F821", "E402", "B905"]
+"archive/notebooks/**" = ["F821", "E402", "B905"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

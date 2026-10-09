@@ -8,6 +8,7 @@
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_signals (
     patient_id STRING,
     stay_no BIGINT,
+    first_encounter_id STRING,
     admit_year INT,
     age_at_admit BIGINT,
     age_band STRING,
@@ -47,7 +48,7 @@ CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.readmission_signals (
     CONSTRAINT admit_not_after_discharge EXPECT (admit_day <= discharge_day) ON VIOLATION FAIL UPDATE,
     CONSTRAINT year_matches_day EXPECT (admit_year = year(admit_day)) ON VIOLATION FAIL UPDATE
 )
-COMMENT "One row per index stay. Never model features: post_* (known only after discharge), outcome_* (the answer), stay_claim_cost (the bill is not final at discharge), admit_year, admit_day and discharge_day (the phase 6 split), the keys patient_id, stay_no, and key_copies (a gate)."
+COMMENT "One row per index stay. Never model features: post_* (known only after discharge), outcome_* (the answer), stay_claim_cost (the bill is not final at discharge), admit_year, admit_day and discharge_day (the phase 6 split), the keys patient_id, stay_no, first_encounter_id, and key_copies (a gate)."
 TBLPROPERTIES ("quality" = "gold")
 AS
 WITH stays AS (
@@ -164,6 +165,7 @@ via_emergency AS (
 joined AS (
     SELECT i.patient_id,
            i.stay_no,
+           i.first_encounter_id,
            year(i.admit_day)                                                AS admit_year,
            -- 90 means "90 or older" (Safe Harbor, as patient_360).
            least(floor(months_between(i.admit_day, p.birth_date) / 12), 90) AS age_at_admit,
@@ -217,6 +219,9 @@ top_reason AS (
 
 SELECT j.patient_id,
        j.stay_no,
+       -- The stay's key. stay_no counts a patient's stays in order, so a late
+       -- earlier visit would renumber every later one; this id cannot move (D81).
+       j.first_encounter_id,
        j.admit_year,
        j.age_at_admit,
        CASE WHEN j.age_at_admit < 18 THEN '0-17'
@@ -249,7 +254,7 @@ SELECT j.patient_id,
        j.outcome_days_to_return,
        j.outcome_return_stay_cost,
        -- Not a feature: the one-row-per-stay gate reads it (E59).
-       count(*) OVER (PARTITION BY j.patient_id, j.stay_no)         AS key_copies
+       count(*) OVER (PARTITION BY j.first_encounter_id)            AS key_copies
 FROM joined j
 CROSS JOIN cut k
 JOIN top_reason t ON t.admit_reason = j.admit_reason;

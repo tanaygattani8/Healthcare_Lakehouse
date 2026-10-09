@@ -9,7 +9,8 @@ SQL = Path(__file__).resolve().parents[1] / "pipelines/medallion/gold/readmissio
 TYPES = r"STRING|INT|BIGINT|SMALLINT|TINYINT|DOUBLE|FLOAT|BOOLEAN|DATE|TIMESTAMP|DECIMAL"
 # What the model reads beyond FEATURES: the target, the keys (scoring and
 # patient-grouped folds), the split dates and the population flag.
-MODEL_READS = set(rm.FEATURES) | {rm.TARGET, "patient_id", "stay_no", "admit_day",
+MODEL_READS = set(rm.FEATURES) | {rm.TARGET, "patient_id", "stay_no", "first_encounter_id",
+                                  "admit_day",
                                   "discharge_day", "had_bypass_surgery"}
 
 

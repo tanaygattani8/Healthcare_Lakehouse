@@ -165,7 +165,9 @@ with side:
 ui.heading("4 · 5", "Could we see it coming?")
 main, side = ui.section()
 with main:
-    short = sorted(levels[levels["separates"] & levels["at_discharge"]]["signal"].unique())
+    # A hidden level's verdict is not published (D81): only shown levels list here.
+    short = sorted(levels[levels["separates"].fillna(False) & levels["at_discharge"]]
+                   ["signal"].unique())
     ui.stamp(f"Phase 6 · {decision.decision}")
     table = levels[levels["at_discharge"]].assign(
         signal=lambda d: d["signal"].map(NAMES),
@@ -179,15 +181,17 @@ with main:
             f"{100 * r.rest_rate:.1f} ({100 * r.rest_low:.1f}–{100 * r.rest_high:.1f})",
             axis=1)})
     ui.table(table[["signal", "level", "index_stays", "rate % (95%)", "rest % (95%)",
-                    "separates"]])
+                    "separates"]].assign(
+        separates=lambda d: d["separates"].map({True: "yes", False: "no"}).fillna("hidden")))
     ui.finding(FINDINGS[5])
 with side:
     ui.notes("A level separates when both sides have 30+ stays, the higher rate comes from 10+ "
              "different patients, and the two 95% ranges do not overlap. The rule was fixed "
              "before the numbers were looked at.",
-             f"{len(short)} signals separate; GO needed 2.",
-             "Hidden levels stay in the table without numbers: their decision was made on the "
-             "real counts and is part of the verdict. <i>D66</i>")
+             f"{decision.shortlisted} signals separate; GO needed 2.",
+             "Hidden levels stay in the table without numbers or their own yes/no: that was "
+             "decided on the real counts and is in the verdict, but published beside the "
+             "totals it could say which side of the rule a hidden level falls. <i>D66, D81</i>")
 
 scores = ui.snapshot("eval_scores")
 ui.heading("Appendix", "Can you ask this in English?")
@@ -205,6 +209,10 @@ with side:
     ui.notes(f"The story's own questions ({name} set), asked in English. Each answer's SQL was "
              "run and compared with a hand-checked answer.",
              "Counts, not percentages: each tier has only a few questions. Two identical runs "
-             "move by 1-2 verdicts, so a gap that small is noise.")
+             "move by 1-2 verdicts, so a gap that small is noise.",
+             "Not a ranking. On the same 20 questions no pair differs significantly (exact "
+             "McNemar, both runs): Genie against the metric views p = 0.13 and 0.5, Genie "
+             "against the gold tables 0.07 and 0.29. 20 questions cannot separate them. "
+             "<i>D81</i>")
 
 ui.pager(4)

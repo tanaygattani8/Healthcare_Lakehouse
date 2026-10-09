@@ -7,7 +7,7 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
-**Status:** An independent audit challenged every decision; its three findings a reader could check (two unmasked PHI copies, a hidden count of 10 recoverable by subtraction, a prod target never deployed) are fixed (D79). Its fourth changed the ML verdict: trained from 2000 rather than 1915, and judged at the cutoff it would run at, the model beats the rule it was first said to match (D80). Phase 10 complete: `main` only changes through a pull request
+**Status:** An independent audit challenged every decision; its three findings a reader could check (two unmasked PHI copies, a hidden count of 10 recoverable by subtraction, a prod target never deployed) are fixed (D79). Its fourth changed the ML verdict: trained from 2000 rather than 1915, and judged at the cutoff it would run at, the model beats the rule it was first said to match (D80). The rest of its findings are fixed too (D81); see [What the audit changed](#what-the-audit-changed). Phase 10 complete: `main` only changes through a pull request
 whose `lint`, `bundle` and `dags` checks are green, admins included (D78).
 The public app was redesigned (D76): the home page is the pipeline drawn
 as a map, and each stop is a chapter written like a research paper. Chapter 7
@@ -55,6 +55,24 @@ It reads only the published snapshots, never the warehouse. Every number on
 it is computed from them, and any group of 1-10 is hidden. Chapter 7's numbers
 come from the dashboard's own SQL, and its hospital and insurer names are made
 up before publishing: Synthea takes them from real ones (D77).
+
+## What the audit changed
+
+After phase 10 an independent reviewer was given the code, not the decision
+log, and told to challenge every decision. It raised 32; argued against the
+log, most were answered or narrowed, and the rest were fixed (D79-D81).
+
+| Found | Fixed |
+|---|---|
+| Two unmasked copies of the patient table beside the masked one | One is a temporary view, the other tagged and masked; a check lists any untagged PHI column, anywhere. Each Lakeflow table's hidden backing table ignores masks: recorded as a limit (D79) |
+| Hidden admit reasons that together gave 10 readmissions back by subtraction | Hidden levels must hold 0 or 11+ between them; each level's yes/no is no longer published when hidden (D79, D81) |
+| A prod bundle target validated in CI and never deployed | Removed (D79) |
+| The model trained on stays back to 1915, and judged at an alert count no one deploys | Trained from 2000; judged at its own cutoff against the rule cut to match: **beats the rule** (D80) |
+| Three hand-built snapshot guards | One deny-by-default role for every number column; an undeclared one stops the publish (D81) |
+| Nothing checked clearance before a pipeline run (D47) | The `medallion` DAG's first task refuses to start without a full clearance row, or with any PHI column unmasked (D81) |
+| No test read the SQL | Every SQL statement parses in CI, and every SQL file is UTF-8 (one wasn't: E70) |
+| No unique-key check in silver; stays keyed by position | Duplicate patient or visit ids fail the update; stays and scores keyed on their first encounter (D81) |
+| Smaller ones | `setup-cli` pinned by commit; income and spend dropped from the de-identified patients; care gaps counted in Chicago days (no number moved); the text-to-SQL table is called "not separable", not a ranking (exact McNemar, p ≥ 0.07); a manifest dates every snapshot; probes moved to `archive/` (D81) |
 
 ## What phase 10 produced
 
@@ -301,9 +319,11 @@ by subtraction (D66).
 | Llama 3.3 70B + metric views | 12 | 13 |
 | Llama 3.3 70B + gold tables | 10 | 11 |
 
-Verdicts move by 1-2 between identical runs. Genie led the metric layer by
-4 and then 2, so its lead is likely but not firm, and metric vs raw is
-within noise. The metric layer removed the raw model's own mistakes
+Verdicts move by 1-2 between identical runs, and on 20 questions **no pair
+differs significantly** (exact McNemar on the same questions: Genie vs the
+metric layer p = 0.13 and 0.5, Genie vs raw 0.07 and 0.29, metric vs raw
+0.73 in both runs). Read the table as three contestants that 20 questions
+cannot separate, not as a ranking (D81). The metric layer removed the raw model's own mistakes
 (columns from the wrong table, summing booleans) and its personal-data
 answers, but it also capped what could be asked: two test questions needed
 detail these views do not keep, and every contestant missed both. That cap
@@ -509,7 +529,9 @@ scheduled: on Free Edition a timer-driven run can exhaust the daily quota
 unattended. The `retrain` DAG is triggered the same way, one cursor per run:
 `docker compose --env-file ../.env exec airflow-scheduler airflow dags trigger retrain -c '{"as_of": "2021-01-01", "mode": "replay"}'`.
 It refuses to start unless the pipeline's last update passed its gates,
-and refuses a year out of order. `--env-file ../.env` is how Airflow gets the Databricks credentials —
+and refuses a year out of order. `medallion` first checks the clearance row
+and that every PHI column is masked, through the SQL warehouse; it needs
+`DATABRICKS_HTTP_PATH` in the same `.env` (D81). `--env-file ../.env` is how Airflow gets the Databricks credentials —
 there is no second credential file.
 
 ### Merging

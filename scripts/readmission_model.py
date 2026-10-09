@@ -17,7 +17,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 # First admit day in training. Before it, stays reach back to 1915 and the
 # patients are younger and healthier than 2020's: training "drift" was there
 # on day one. The longest window whose age and condition PSI against
-# production stay under 0.25 (probe_window.py, D80).
+# production stay under 0.25 (archive/notebooks/probe_window.py, D80).
 TRAIN_FROM = "2000-01-01"
 TRAIN_UNTIL = "2019-12-01"  # last discharge day in training: every label is known by 2020
 PROD_FROM = "2020-01-01"    # first admit day in production
@@ -35,7 +35,8 @@ FLAGS = ["has_diabetes", "has_hypertension", "has_cardiovascular_disease", "is_p
 CATEGORIES = ["gender", "admit_reason"]
 FEATURES = NUMBERS + FLAGS + CATEGORIES
 # Never model inputs, whatever FEATURES says (spec §3.2).
-NEVER = {"patient_id", "stay_no", "admit_year", "admit_day", "discharge_day", "stay_claim_cost"}
+NEVER = {"patient_id", "stay_no", "first_encounter_id", "admit_year", "admit_day",
+         "discharge_day", "stay_claim_cost"}
 LEAK_PREFIXES = ("post_", "outcome_")
 GRID = {
     "logistic": [{"C": c} for c in (0.01, 0.1, 1)],

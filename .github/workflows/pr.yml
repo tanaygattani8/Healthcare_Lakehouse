@@ -46,7 +46,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: databricks/setup-cli@main
+      # Pinned by commit, not @main: this job holds the workspace token, and a
+      # branch can be moved under it. v1.20.0, the release #6 passed with (D81).
+      - uses: databricks/setup-cli@9b64c94a6d2b2e830592d80e9f14c26d32b42ad7  # v1.20.0
 
       # A personal access token is the Free Edition degradation. A service
       # principal with scoped permissions is what production uses, and OIDC is

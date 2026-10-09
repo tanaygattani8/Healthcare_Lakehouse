@@ -72,7 +72,7 @@ return note
 $$;
 
 CREATE OR REPLACE TABLE healthcare_dev.deid.patient
-COMMENT "De-identified patients. 5-year birth and death bands, blank where fewer than 5 people share band + gender + death band, and for 90+. No ZIP, names or identifiers. Join on deid_id."
+COMMENT "De-identified patients. 5-year birth and death bands, blank where fewer than 5 people share band + gender + death band, and for 90+. No ZIP, names, identifiers, income or spend. Join on deid_id."
 AS
 WITH aged AS (
     SELECT p.*, k.deid_id,
@@ -98,8 +98,10 @@ SELECT deid_id,
        CASE WHEN age > 89 THEN '90+' END    AS age_band,
        k < 5 AS years_suppressed,
        is_deceased, GENDER AS gender, RACE AS race, ETHNICITY AS ethnicity,
-       MARITAL AS marital, STATE AS state,
-       healthcare_expenses, healthcare_coverage, income
+       MARITAL AS marital, STATE AS state
+-- No income or healthcare spend: each is close to unique per person (D56), so
+-- either would pick people out whatever k says. Dropped after the audit; the
+-- live table lost them by ALTER, not a rebuild, so its bands did not move (D81).
 FROM counted;
 
 CREATE OR REPLACE TABLE healthcare_dev.deid.encounter
@@ -115,7 +117,7 @@ FROM healthcare_dev.silver.encounter e
 JOIN healthcare_dev.ops.deid_key k USING (patient_id);
 
 CREATE OR REPLACE TABLE healthcare_dev.deid.note
-COMMENT "De-identified notes. Private text found by the patient's own details (Program 0, 1.000 on the test set) replaced: [NAME], dates moved by the patient's shift, 90+."
+COMMENT "De-identified notes. Private text found by the patient's own details (the answer sheet's spans, so no score; check_deid finds no first name left) replaced: [NAME], dates moved by the patient's shift, 90+."
 AS
 WITH spans AS (
     SELECT patient_id,

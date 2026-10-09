@@ -144,7 +144,7 @@ fact = spark.table(f"{C}.gold.fact_encounter")
 condition = spark.table(f"{C}.silver.condition")
 measure_code = spark.table(f"{C}.gold.measure_code")
 
-data_end = enc.agg(F.to_date(F.max("started_at")).alias("last_day"))
+data_end = enc.agg(local_day(F.max("started_at")).alias("last_day"))   # a Chicago day (D81)
 
 # From fact_encounter, not silver: money is already DECIMAL(14,2).
 visits = fact.groupBy("patient_id").agg(

@@ -69,6 +69,8 @@ x-airflow-common:
     # token is never written into this file or into Airflow's UI.
     AIRFLOW_CONN_DATABRICKS_DEFAULT: '{"conn_type": "databricks", "host": "${DATABRICKS_HOST}", "password": "${DATABRICKS_TOKEN}"}'
     MEDALLION_PIPELINE_ID: 0a1b3a1c-981b-498c-b2e4-70a58391e1a8
+    # The SQL warehouse, for the medallion DAG's PHI gate (D81); from the same .env.
+    DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH}
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-airflow_jwt_secret}
     AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}

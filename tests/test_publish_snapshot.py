@@ -6,6 +6,7 @@ import pytest
 
 from scripts.publish_snapshot import (
     check_only_categories,
+    check_roles,
     check_small_cells,
     ops_queries,
     publish_drift,
@@ -269,3 +270,26 @@ def test_ops_queries_are_the_dashboards_own():
                             "stays_trend", "by_payer", "by_hospital"}
     sql, params = queries["by_payer"]
     assert "metrics.shown(" in sql and set(params.values()) == {"All"}
+
+
+def test_every_committed_snapshot_has_a_role_for_every_number():
+    from pathlib import Path
+    folder = Path(__file__).resolve().parents[1] / "snapshots"
+    check_roles({p.stem: pd.read_parquet(p) for p in folder.glob("*.parquet")})
+
+
+def test_an_undeclared_number_column_stops_the_publish():
+    with pytest.raises(SystemExit, match="no declared role"):
+        check_roles({"ops_visits": pd.DataFrame({"visits": [500], "new_count": [40]})})
+    with pytest.raises(SystemExit, match="no declared role"):
+        check_roles({"a_new_frame": pd.DataFrame({"n": [500]})})
+
+
+def test_a_count_of_1_to_10_stops_the_publish_but_businesses_do_not():
+    with pytest.raises(SystemExit, match="1-10"):
+        check_roles({"bronze_counts": pd.DataFrame({"layer": ["quarantine"],
+                                                    "entity": ["patient"], "rows": [3]})})
+    check_roles({"bronze_counts": pd.DataFrame({"layer": ["bronze"], "entity": ["payers"],
+                                                "rows": [10]})})
+    check_roles({"deid_kanon": pd.DataFrame({"groups": [2], "people": [8]})})
+
