@@ -1,7 +1,4 @@
--- One row per (system, code) across every vocabulary in the dataset.
--- Twelve source paths, four systems: allergies carries both SNOMED and RxNorm,
--- and procedures contributes 380 SNOMED codes that overlap conditions by zero.
--- Measured in docs/silver-model-findings.md. Expected: 1,340 rows.
+-- One row per (system, code) across every vocabulary; expect 1,340 rows.
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.dim_code
 COMMENT "Conformed medical codes. Every clinical fact references code_key."
@@ -26,14 +23,11 @@ WITH sourced AS (
     UNION ALL
     SELECT 'SNOMED', CODE, DESCRIPTION, START FROM ${catalog}.bronze.br_careplans
 
-    -- Encounter type codes. 181,699 of 187,540 encounters carry a code that
-    -- appears in no other file.
+    -- Encounter type codes, mostly found in no other file.
     UNION ALL
     SELECT 'SNOMED', CODE, DESCRIPTION, START FROM ${catalog}.bronze.br_encounters
 
-    -- Reason codes. A "why" is as much a clinical code as a "what", and
-    -- careplans alone contributes 38 codes found nowhere else -- without these,
-    -- every careplan row would fail its code lookup and quarantine whole.
+    -- Reason codes, or careplan rows would fail their lookup.
     UNION ALL
     SELECT 'SNOMED', REASONCODE, REASONDESCRIPTION, START FROM ${catalog}.bronze.br_encounters
     UNION ALL
@@ -46,8 +40,7 @@ WITH sourced AS (
 
 normalised AS (
     SELECT
-        -- conditions and procedures say the URI, allergies says the short name.
-        -- Unnormalised, SNOMED becomes two unrelated systems.
+        -- Normalise the URI and the short name into one SNOMED system.
         CASE
             WHEN raw_system IN ('http://snomed.info/sct', 'SNOMED-CT') THEN 'SNOMED'
             ELSE raw_system
@@ -65,8 +58,7 @@ spans AS (
     GROUP BY system, code
 ),
 
--- Codes with two descriptions exist today (6299-2, 312961, 133 and others).
--- Latest wins: the most recently seen description is the current one.
+-- Latest description wins.
 latest AS (
     SELECT system, code, description
     FROM (
@@ -84,9 +76,7 @@ latest AS (
 )
 
 SELECT
-    -- Deterministic: the same code yields the same key on every rebuild, so
-    -- silver can be dropped and rebuilt from bronze without orphaning every
-    -- fact row. A counter cannot promise that.
+    -- Deterministic key, so a rebuild orphans no fact row.
     xxhash64(s.system, s.code) AS code_key,
     s.system,
     s.code,

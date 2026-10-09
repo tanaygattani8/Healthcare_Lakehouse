@@ -1,15 +1,4 @@
-"""Phase 1 decision gate: is 30-day readmission a viable ML target on this data?
-
-Runs locally in DuckDB rather than on Databricks. The gate must be cheap and
-must not consume Free Edition quota, and it has to answer before anything is
-built on top of the label.
-
-Synthea generates patients from explicit rule-based disease modules, so a
-supervised model trained on it learns the generator's rules rather than
-clinical reality. If the base rate here is degenerate, the eventual ML target
-pivots to cost/utilization or care-gap prediction. Finding that out now is the
-entire point of this script.
-"""
+"""Phase 1 gate, in local DuckDB: is 30-day readmission a viable target on Synthea data?"""
 
 from __future__ import annotations
 
@@ -18,9 +7,7 @@ from pathlib import Path
 
 import duckdb
 
-# ponytail: LEAD undercounts when inpatient stays overlap (122 of 1,292 on the
-# dev tier). Merging overlapping stays per CMS methodology belongs in phase 4's
-# gold layer. Measured cost and reasoning: docs/readmission-gate.md.
+# ponytail: LEAD undercounts overlapping stays (122 of 1,292); gold merges them.
 GATE_SQL = """
 WITH inp AS (
     SELECT

@@ -102,8 +102,7 @@ def test_death_at_index_excludes_the_admission(tmp_path, con):
 
 
 def test_insufficient_follow_up_is_excluded(tmp_path, con):
-    # e2 discharges 10 days before the end of the data — it cannot be observed
-    # for a full 30 days, so it must not be counted as an index admission.
+    # e2 can't be followed a full 30 days, so it is not an index admission.
     enc, pat = write(
         tmp_path,
         "e1,2020-01-01T00:00:00Z,2020-01-05T00:00:00Z,p1,inpatient\n"
@@ -145,18 +144,7 @@ def test_empty_index_set_gives_zero_base_rate_not_division_error(tmp_path, con):
 
 
 def test_overlapping_stay_blocks_the_lookahead(tmp_path, con):
-    """Pins the known ceiling in NEXT_ADMITTED_SQL rather than leaving it implicit.
-
-    e2 is nested inside e1's stay. LEAD orders by admission, so e1's lookahead
-    lands on e2 (which starts *before* e1 discharges) and never reaches e3,
-    15 days after e1's discharge. e3 is counted once — against e2, not e1.
-
-    Merging overlapping stays into one index admission is the correct fix and
-    belongs in phase 4's gold layer, not in a gate. If this test starts failing
-    with 2, someone changed the lookahead to min-after-discharge, which
-    double-attributes one readmission to two index stays. On the real dev-tier
-    dataset the two approaches differ by 3.4 points of base rate.
-    """
+    """Pins LEAD's known ceiling: nested e2 takes e3's readmission from e1; gold merges stays."""
     enc, pat = write(
         tmp_path,
         "e1,2020-01-01T00:00:00Z,2020-01-10T00:00:00Z,p1,inpatient\n"
@@ -170,9 +158,7 @@ def test_overlapping_stay_blocks_the_lookahead(tmp_path, con):
 
 
 def test_verdict_covers_every_branch():
-    """verdict() is the function that produces the actual decision, and it is
-    pure branching — exactly the shape that passes review untested and then
-    ships the wrong call."""
+    """verdict() makes the actual decision."""
     assert "PIVOT" in verdict({"index_admissions": 499, "base_rate": 0.15})
     assert "PIVOT" in verdict({"index_admissions": 5000, "base_rate": 0.005})
     assert "PIVOT" in verdict({"index_admissions": 5000, "base_rate": 0.61})

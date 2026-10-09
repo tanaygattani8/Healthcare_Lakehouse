@@ -1,15 +1,4 @@
--- Phase 3b step 7 — could anyone still be picked out of deid.patient?
---
--- k = how many people share a combination of the columns an outsider could
--- know: birth, death and gender. k = 1 is one person, alone and findable.
--- The whole spread is reported, not the minimum: "minimum k is 1" hides
--- whether that is one person or four hundred.
---
--- Three versions, so the cost of each choice is visible (decision.md D56):
---   plan      full birth date + 3-digit ZIP + gender, as first planned
---   safe      what HIPAA Safe Harbor allows: birth year + 3-digit ZIP + gender
---   released  what deid.patient holds: 5-year bands, no ZIP, k < 5 blanked
--- Saved to ops.kanon_spread for the app. Counts only.
+-- Phase 3b step 7: k = people sharing birth, death and gender; full spread for plan, safe and released (D56).
 
 CREATE OR REPLACE TABLE healthcare_dev.ops.kanon_spread
 COMMENT "Phase 3b step 7: how many people share each quasi-identifier combination, for three levels of detail. Counts only."
@@ -40,8 +29,7 @@ GROUP BY 1, 2;
 SELECT version, k, groups, people FROM healthcare_dev.ops.kanon_spread
 ORDER BY version, CASE k WHEN '11+' THEN 99 WHEN '5-10' THEN 5 ELSE cast(k AS INT) END;
 
--- Must be 0: nobody in the released table shares their combination with
--- fewer than 4 others.
+-- Must be 0: nobody released shares their combination with fewer than 4 others.
 SELECT coalesce(sum(people), 0) AS released_people_below_k5_must_be_0
 FROM healthcare_dev.ops.kanon_spread
 WHERE version = 'released' AND k NOT IN ('5-10', '11+');

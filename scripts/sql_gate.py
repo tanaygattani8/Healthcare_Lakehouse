@@ -1,15 +1,4 @@
-"""May this generated SQL run? Checked before every contestant's statement.
-
-The warehouse runs as the only principal, who owns everything, so a
-generated DROP TABLE would execute (spec §4). This is a parser allow-list:
-sqlglot parses the statement (Databricks dialect) and every table node in the
-tree must be a CTE or sit in healthcare_dev.gold / healthcare_dev.metrics.
-Anything that does not parse is blocked (fail closed).
-
-The spec's keyword scan on the raw text remains as belt and braces, so
-harmless text containing a blocked word (WHERE reason = 'update') is blocked
-too. That cost is accepted.
-"""
+"""Fail-closed allow-list for generated SQL: every table must be a CTE or in gold/metrics."""
 
 from __future__ import annotations
 
@@ -41,8 +30,7 @@ def _names(node: exp.Func) -> set[str]:
 
 
 def _function_problem(tree: exp.Expression) -> str | None:
-    # Unqualified names are safe only because the harness runs
-    # USE healthcare_dev.metrics first.
+    # Safe only because the harness runs USE healthcare_dev.metrics first.
     for dot in tree.find_all(exp.Dot):
         if isinstance(dot.expression, exp.Func):
             return f"blocked function: {dot.sql('databricks')}"

@@ -1,19 +1,10 @@
--- The gold report. Numbers to read, not invariants to enforce.
--- The invariants are pipeline gates since phase 7 (D73): row gates in each
--- table's CREATE, cross-table gates in pipelines/medallion/gold/gold_checks.sql.
--- A gate that breaks fails the pipeline update; nothing here needs to be 0.
+-- The gold report: numbers to read; invariants are pipeline gates since D73.
 
--- Reference tables and the visit fact. The checks that used to live here are
--- gates now: gold_checks.unknown_* / duplicate_* / *_not_in_dim_date /
--- fact_rows_off / fact_dollars_off, fact_encounter.duration_not_negative and
--- coverage_not_above_bill.
+-- Reference tables and the visit fact (their checks are gates in gold_checks.sql).
 SELECT min(calendar_date), max(calendar_date), count(*) AS days
 FROM healthcare_dev.gold.dim_date;
 
--- Step 3, check B. The gate's own rules, on silver: one row per ENCOUNTER,
--- UTC days, data ending at the last hospital discharge. Must equal the gate
--- (1,292 / 24 / 3 / 1,265 / 202 on 2026-09-27), or differ only by the
--- hospital encounters silver quarantined, counted below.
+-- Step 3, check B: the gate's rules on silver; must equal 1,292 / 24 / 3 / 1,265 / 202 bar quarantine.
 WITH inp AS (
     SELECT patient_id, started_at AS admitted, stopped_at AS discharged,
            lead(started_at) OVER (PARTITION BY patient_id ORDER BY started_at) AS next_admitted
@@ -39,10 +30,7 @@ FROM f;
 SELECT count(*) AS inpatient_encounters_quarantined
 FROM healthcare_dev.ops.quarantine_encounter WHERE encounter_class = 'inpatient';
 
--- Step 3, check C. The real table: rate and every exclusion. Expect 14,313
--- stays, 1,382 encounters merged away, 10,724 index stays, 140 readmitted.
--- (Gates now: readmission_events.index_flag_known and one_row_per_stay, and
--- gold_checks.events_encounters_off.)
+-- Step 3, check C: expect 14,313 stays, 1,382 merged, 10,724 index stays, 140 readmitted.
 SELECT count(*)                                         AS stays,
        sum(encounters_in_stay) - count(*)               AS encounters_merged_away,
        count_if(excl_died_during_stay)                  AS excl_died,
@@ -57,8 +45,7 @@ SELECT count(*)                                         AS stays,
                 AND NOT readmitted_30d)                 AS returns_not_counted_planned
 FROM healthcare_dev.gold.readmission_events;
 
--- Step 3, check D. The patient with the most merged encounters, stay by stay.
--- Compare by hand with their raw inpatient encounters in silver.encounter.
+-- Step 3, check D: the patient with the most merged encounters, to compare by hand.
 SELECT stay_no, encounters_in_stay, admitted_at, discharged_at,
        days_to_next_stay, readmitted_30d
 FROM healthcare_dev.gold.readmission_events
@@ -66,9 +53,7 @@ WHERE patient_id = (SELECT max_by(patient_id, encounters_in_stay)
                     FROM healthcare_dev.gold.readmission_events)
 ORDER BY stay_no;
 
--- Step 4. One line per measure. Every column is a count except the rate.
--- (Gates now: care_gap.one_row_per_patient_measure, and the statin rule's
--- gold_checks.nystatin_counted and statin_missed.)
+-- Step 4: one line per measure; every column is a count except the rate.
 SELECT measure, measure_year,
        count(*)                                              AS in_denominator,
        count_if(excl_age)                                    AS excl_age,
@@ -82,8 +67,7 @@ SELECT measure, measure_year,
 FROM healthcare_dev.gold.care_gap
 GROUP BY measure, measure_year ORDER BY measure;
 
--- How many medication rows the statin rule matches (a count to read; its two
--- must-be-0 checks are gates).
+-- Medication rows the statin rule matches.
 SELECT count_if(hit.code IS NOT NULL) AS statin_rows_matched
 FROM healthcare_dev.silver.medication m
 LEFT JOIN healthcare_dev.gold.measure_code hit
@@ -91,14 +75,9 @@ LEFT JOIN healthcare_dev.gold.measure_code hit
  AND lower(m.source_description) RLIKE concat('\\b', hit.code, '\\b')
 WHERE lower(m.source_description) LIKE '%statin%';
 
--- Step 5. patient_360 adding up to the other gold tables is a gate now:
--- gold_checks.patient_360_*, and patient_360.age_known_and_capped.
--- Gold carrying no governed tag is a gate now: gold_checks.gold_tagged_columns.
+-- Step 5: patient_360 totals and gold tags are gates now (gold_checks.sql).
 
--- Phase 5. readmission_signals: expect rows = 10724, readmitted = 140 (D68).
--- One row per key, agreement with readmission_events and the per-row rules
--- are gates now: one_row_per_stay and the other constraints in
--- readmission_signals.sql, and gold_checks.signals_*.
+-- Phase 5: readmission_signals, expect rows = 10724, readmitted = 140 (D68).
 SELECT count(*) AS rows, count_if(outcome_readmitted_30d) AS readmitted
 FROM healthcare_dev.gold.readmission_signals;
 
@@ -119,10 +98,7 @@ FROM healthcare_dev.gold.readmission_signals;
 
 -- D68's day-before window is a gate now: gold_checks.surgery_from_previous_stay.
 
--- Phase 6. The populations and the split (spec section 2). Expect the total row
--- (part NULL) at all = 10724 / 140 and no_bypass = 9891 / 61, and production
--- (all) at 2451 / 34. Record counts of 11 or more in decision.md; write any
--- count of 1-10 as "1-10".
+-- Phase 6 split: expect all 10724 / 140, no_bypass 9891 / 61, production 2451 / 34; write 1-10 as "1-10".
 WITH s AS (
     SELECT *,
            CASE WHEN admit_day >= DATE'2020-01-01' THEN 'production'
@@ -139,7 +115,6 @@ FROM s
 GROUP BY ROLLUP(part)
 ORDER BY part;
 
--- First stays (no earlier discharge). Expect 4956. The other new-column
--- rules are gates in readmission_signals.sql.
+-- First stays (no earlier discharge): expect 4956.
 SELECT count_if(days_since_last_discharge IS NULL) AS first_stays
 FROM healthcare_dev.gold.readmission_signals;

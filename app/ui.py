@@ -1,11 +1,4 @@
-"""The app's design kit: "layer metals" (README, What the app looks like).
-
-Pages are short scripts that read like the paper: chapter(), then for each
-section a reading column and a margin (section()), numbers, a figure, a
-verdict stamp. Everything Streamlit does not draw itself is a few lines of
-HTML here, styled by one stylesheet, in the palette .streamlit/config.toml
-also uses. Snapshots are the only data (README, Architecture notes).
-"""
+"""The design kit: page parts over one stylesheet; snapshots are the only data."""
 
 from __future__ import annotations
 
@@ -18,9 +11,7 @@ import streamlit as st
 
 SNAPSHOTS = Path(__file__).resolve().parent.parent / "snapshots"
 
-# The same colours as .streamlit/config.toml, plus what only the kit draws.
-# Chart pairs (series) were checked with the dataviz palette validator in both
-# modes: lightness band, chroma, colour-blind and normal-vision separation.
+# .streamlit/config.toml's colours plus the kit's; series pairs pass the dataviz validator.
 PALETTES = {
     "light": {"bg": "#F6F4EF", "surface": "#EDE9E0", "ink": "#16181D", "muted": "#5A606B",
               "rule": "#DAD5CA", "accent": "#8A5A1F", "faint": "#B7B1A5",
@@ -32,8 +23,7 @@ PALETTES = {
              "series": ("#B8861A", "#5B8FDB")},
 }
 
-# Every chapter, in reading order: number, page file, short label for the top
-# bar, title, and its one-line finding for the home page.
+# Chapters in reading order: number, page, top-bar label, title, home-page finding.
 CHAPTERS = [
     (1, "chapters/c1_data.py", "Data", "The data arrives",
      "Every raw row lands; the ones that break a rule are kept, not dropped."),
@@ -122,8 +112,7 @@ def finding(text: str) -> None:
 
 
 def notes(*items: str, across: bool = False) -> None:
-    """Margin notes: the caveats and decision numbers, numbered. `across` lays
-    them out side by side under a full-width block instead of down a margin."""
+    """Numbered margin notes; `across` lays them side by side under a full-width block."""
     body = "".join(f"<p><b>{i}</b>{item}</p>" for i, item in enumerate(items, 1))
     st.html(f'<div class="lh-notes{" across" if across else ""}">{body}</div>')
 
@@ -134,8 +123,7 @@ def figure(chart: alt.Chart, number: str, caption: str) -> None:
 
 
 def table(df: pd.DataFrame, formats: dict[str, str] | None = None, missing: str = "–") -> None:
-    """A table in the paper's style: rules, not a grid; numbers right-aligned in
-    the mono face. `missing` is what an empty cell reads, e.g. "hidden"."""
+    """A ruled table, numbers right-aligned in mono; `missing` is what an empty cell reads."""
     formats = formats or {}
     numeric = {c for c in df.columns
                if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])}

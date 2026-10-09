@@ -1,15 +1,8 @@
-"""CI: the Airflow DAGs load in the real image (phase 10, spec §3.3).
-
-Runs inside the image built from orchestration/Dockerfile, with dags/
-mounted at /opt/airflow/dags. Lives beside dags/, not in it: Airflow parses
-every file in dags/ as a possible DAG. Exits non-zero on any import error,
-or if the DAGs are not exactly the ones this repo checks.
-"""
+"""CI: the DAGs load in the real Airflow image, and are exactly the expected ones."""
 
 import sys
 
-# Airflow 3.3 keeps DagBag here, and it no longer takes include_examples:
-# example DAGs would show up in dag_ids below and fail the check anyway.
+# Airflow 3.3's DagBag has no include_examples; examples would fail the id check anyway.
 from airflow.dag_processing.dagbag import DagBag
 
 # A new DAG joins this set in the same change, or CI goes red.

@@ -3277,3 +3277,18 @@ help, a reason.
 **Kept as it was.** The `champion` alias: it is MLflow's convention, the
 rule is not a registered model, and chapter 5 says which comparison the
 model wins.
+
+### D82 — comments are one line
+
+**Decided.** Every comment and docstring is one line; where a block held
+several separate facts, it became several one-line comments. Decision and
+error numbers (Dnn, Enn) stay in the line, so the reasoning is one lookup
+away in this file instead of repeated beside the code. The Apache licence
+header in `orchestration/docker-compose.yaml` stays whole, and
+`eval/questions_test.yaml` is untouched (its hash freezes the test set).
+
+**Checked.** A script compared every changed file with main after removing
+comments and docstrings (Python AST, SQL with comments stripped, parsed
+YAML/TOML): no code changed. `sql/deid.sql` it could not judge (an
+apostrophe in its Python UDF), so its diff was read by hand. 113 files,
+about 1,150 lines shorter; ruff clean, 321 tests pass.

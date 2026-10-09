@@ -1,6 +1,4 @@
-"""Chapter 7: phase 8's operations dashboard (D74), its default view. The
-numbers come from the dashboard's own SQL (publish_snapshot.ops_queries), and
-hospital and insurer names are made up there, before anything is saved."""
+"""Chapter 7: the operations dashboard's default view (D74), names made up at publish."""
 
 import altair as alt
 import pandas as pd
@@ -137,8 +135,7 @@ main, side = ui.section()
 with main:
     order = visits.groupby("visit_type")["visits"].sum().sort_values(ascending=False).index
     v = visits.assign(type=visits["visit_type"].map(VISIT_TYPES))
-    # One chart per type rather than a facet: a facet has a fixed width and
-    # clips on a phone; separate charts stretch. Only the last shows years.
+    # Separate charts, not a facet: facets clip on phones. Only the last shows years.
     for i, t in enumerate(order):
         last = i == len(order) - 1
         chart = alt.Chart(v[v["visit_type"] == t]).mark_line(

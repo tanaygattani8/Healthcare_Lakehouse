@@ -14,10 +14,7 @@ from sklearn.model_selection import GroupKFold, cross_val_predict, cross_val_sco
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-# First admit day in training. Before it, stays reach back to 1915 and the
-# patients are younger and healthier than 2020's: training "drift" was there
-# on day one. The longest window whose age and condition PSI against
-# production stay under 0.25 (archive/notebooks/probe_window.py, D80).
+# First training admit day: the longest window with age/condition PSI under 0.25 (D80).
 TRAIN_FROM = "2000-01-01"
 TRAIN_UNTIL = "2019-12-01"  # last discharge day in training: every label is known by 2020
 PROD_FROM = "2020-01-01"    # first admit day in production
@@ -56,9 +53,7 @@ def population(df: pd.DataFrame, name: str) -> pd.DataFrame:
 
 def split(df: pd.DataFrame, train_until: str = TRAIN_UNTIL, prod_from: str = PROD_FROM,
           train_from: str | None = TRAIN_FROM) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Training, gap, production (spec §2). The gap's 30-day labels would
-    look past the cutoff, so it is used for nothing. Stays admitted before
-    train_from belong to none of the three (D80)."""
+    """Training, gap, production; the gap's labels look past the cutoff, so it is unused (D80)."""
     admit = pd.to_datetime(df["admit_day"])
     discharge = pd.to_datetime(df["discharge_day"])
     before = admit < pd.Timestamp(prod_from)
@@ -86,8 +81,7 @@ def build_features(df: pd.DataFrame, name: str) -> pd.DataFrame:
 
 
 def build_pipeline(kind: str, params: dict, name: str) -> Pipeline:
-    """Everything that depends on the data's spread (fill, scale, which
-    reasons are rare) is fitted inside, on training rows only (spec §3.3)."""
+    """Fill, scale and rare-reason grouping are fitted inside, on training rows only."""
     columns = features_for(name)
     prep = ColumnTransformer([
         ("numbers", make_pipeline(SimpleImputer(strategy="constant", fill_value=NO_EARLIER_STAY,
@@ -104,9 +98,7 @@ def build_pipeline(kind: str, params: dict, name: str) -> Pipeline:
 
 
 def cv_scores(df: pd.DataFrame, name: str, folds: int = 5) -> list[dict]:
-    """Every grid point's average precision over patient-grouped folds.
-    Chosen on this, not recall at 25%, which moves in 5-point steps with
-    ~20 readmissions per fold (spec §4.3)."""
+    """Each grid point's average precision over patient-grouped folds."""
     x, y = build_features(df, name), df[TARGET].astype(int)
     rows = []
     for kind, grid in GRID.items():
@@ -120,10 +112,7 @@ def cv_scores(df: pd.DataFrame, name: str, folds: int = 5) -> list[dict]:
 
 
 def oof_scores(pipe: Pipeline, df: pd.DataFrame, name: str, folds: int = 5) -> np.ndarray:
-    """Each training stay scored by a copy of `pipe` fitted on the other
-    patients' folds. The alert cutoff and the drift reference use these: a
-    model scoring the stays it was fitted on looks surer than it will be on
-    new ones, and that gap would read as drift (D72)."""
+    """Out-of-fold training scores: in-sample scores look surer and would read as drift (D72)."""
     return cross_val_predict(clone(pipe), build_features(df, name), df[TARGET].astype(int),
                              groups=df["patient_id"], cv=GroupKFold(folds),
                              method="predict_proba")[:, 1]
@@ -142,8 +131,7 @@ def rule_probability(train: pd.DataFrame, prod: pd.DataFrame) -> np.ndarray:
 
 
 def alert_threshold(scores, share: float) -> float:
-    """The score that flags `share` of training stays: the only cutoff a
-    deployment would have (spec §4.3)."""
+    """The score that flags `share` of training stays: the deployable cutoff."""
     return float(np.quantile(scores, 1 - share))
 
 
@@ -160,8 +148,7 @@ def recall_at_count(y, score, k: int) -> float:
 
 
 def patient_resamples(groups, n: int, seed: int) -> Iterator[np.ndarray]:
-    """n resamples of whole patients, as row indices, so one patient's many
-    stays move together."""
+    """n resamples of whole patients, as row indices."""
     _, patient = np.unique(np.asarray(groups), return_inverse=True)
     order = np.argsort(patient, kind="stable")
     rows_of = np.split(order, np.cumsum(np.bincount(patient))[:-1])
@@ -172,10 +159,7 @@ def patient_resamples(groups, n: int, seed: int) -> Iterator[np.ndarray]:
 
 def bootstrap_difference(y, model, rule, groups, n: int = 1000,
                          seed: int = 0) -> tuple[float, float, float]:
-    """95% interval of recall(model) - recall(rule), resampling patients. In
-    each resample both flag as many stays as the 0/1 rule flags there
-    (decision P-f, as revised in D72: rescaling one k moved the rule off its
-    own count)."""
+    """95% interval of recall(model) - recall(rule), both at the rule's own flag count (D72)."""
     y, a, b = np.asarray(y, bool), np.asarray(model, float), np.asarray(rule, float)
     diffs = []
     for idx in patient_resamples(groups, n, seed):
@@ -186,9 +170,7 @@ def bootstrap_difference(y, model, rule, groups, n: int = 1000,
 
 
 def thinned_rule_recall(y, rule, flags: int) -> float:
-    """The rule's expected recall when cut to `flags` alerts at random. It is
-    yes/no, so it cannot move to a budget; keeping a random share of its
-    flags keeps that share of its catches, on average (D80)."""
+    """The 0/1 rule's expected recall when cut to `flags` alerts at random (D80)."""
     y, rule = np.asarray(y, bool), np.asarray(rule, bool)
     if not y.any() or not rule.any():
         return 0.0
@@ -197,9 +179,7 @@ def thinned_rule_recall(y, rule, flags: int) -> float:
 
 def bootstrap_at_cutoff(y, model, rule, groups, threshold: float, n: int = 1000,
                         seed: int = 0) -> tuple[float, float, float]:
-    """95% interval of recall(model at its deployed cutoff) - recall(the rule
-    thinned to as many alerts), resampling patients. bootstrap_difference
-    judges both at the rule's own count, which no deployment uses (D80)."""
+    """95% interval of recall(model at its cutoff) - recall(rule thinned to match) (D80)."""
     y, a, b = np.asarray(y, bool), np.asarray(model, float), np.asarray(rule, bool)
     diffs = []
     for idx in patient_resamples(groups, n, seed):
@@ -218,12 +198,7 @@ def verdict(low: float, readmitted: int) -> str:
 
 def evaluate(y, groups, returning, k: int, scorers: dict, base_rate: float,
              name: str, threshold: float | None = None) -> list[dict]:
-    """Rows for ml.model_results (spec §4.3): the base rate, then each
-    scorer, for all, new and returning patients. scorers maps a name to
-    (score, probability) and must hold 'rule', the comparison. Flags are the
-    top k over all of production; a breakdown counts within its patients.
-    With a threshold, each model is also judged where it is deployed: at
-    that cutoff, against the rule thinned to as many alerts (cut_*, D80)."""
+    """ml.model_results rows per scorer and patient group; cut_* at `threshold` (D80)."""
     y = np.asarray(y, bool)
     groups = np.asarray(groups)
     returning = np.asarray(returning, bool)

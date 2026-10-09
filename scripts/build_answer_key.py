@@ -1,12 +1,4 @@
-"""Find every real patient detail inside every note, and write down where.
-
-Reads the notes from synthea/output/notes/ on this machine and the patient
-details from silver.patient. Writes a CSV that becomes silver.phi_span — the
-answer sheet every detection program is marked against.
-
-Run it on ten patients first and read the output. Phase 1's worst bug
-(errors.md E3) was found by reading actual output rather than trusting config.
-"""
+"""Every real patient detail's position in every note: the silver.phi_span answer key."""
 
 from __future__ import annotations
 
@@ -29,18 +21,12 @@ COLUMNS = {
     "other_id": ["PASSPORT"],
 }
 
-# No minimum length. There used to be one (3 characters, "Mr would hit every
-# line") and it only ever dropped real names: 7 two-letter first names, 1,898
-# occurrences in their own patients' notes and ZERO in anyone else's.
-# find_all() is whole-word and case-sensitive, which is the real guard.
+# No minimum length: it only dropped real two-letter names; whole-word matching is the guard.
 
 MONTHS = ["January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 
-# Anything shaped like one of the date_forms() below. The note is searched
-# once for this, and each hit is looked up in the patient's set of real dates.
-# Searching once per date per form instead took ~10 hours on the full corpus:
-# a patient with 500 visits meant 3,000 passes over a 3 MB note.
+# Search each note once for date shapes, then look hits up (per-date passes took ~10 hours).
 _MONTH = "(?:" + "|".join(MONTHS) + ")"
 DATE_SHAPE = re.compile(
     r"(?<!\w)(?:"
@@ -53,12 +39,7 @@ DATE_SHAPE = re.compile(
 
 
 def check_we_can_see_real_data(cur) -> None:
-    """Stop if the 3a masking would hand us '***' instead of real names.
-
-    Without this the script happily builds an answer sheet full of '***' and
-    every number for the rest of the phase is meaningless. The row filter is
-    checked too: a wrong scope_state returns zero patients, not an error.
-    """
+    """Stop if masking would return '***' names or the row filter zero patients."""
     cur.execute("SELECT healthcare_dev.ops.is_cleared()")
     if not cur.fetchone()[0]:
         raise SystemExit(
@@ -80,8 +61,7 @@ def check_we_can_see_real_data(cur) -> None:
 
 
 def date_forms(value: str) -> list[str]:
-    """A birthday gets written several ways. Miss one and every program is
-    marked wrong on it for ever."""
+    """Every way a date gets written; a missed form is marked wrong for ever."""
     year, month, day = value.split("-")
     name = MONTHS[int(month) - 1]
     d, m = int(day), int(month)
@@ -96,23 +76,13 @@ def date_forms(value: str) -> list[str]:
 
 
 def find_all(note: str, needle: str) -> list[tuple[int, int]]:
-    """Every place `needle` appears as a whole word.
-
-    Whole-word matters: a patient called Ann would otherwise match inside
-    'announced', 'cannot' and 'planned'.
-    """
+    """Every whole-word, case-sensitive position of `needle` (Ann must not match 'planned')."""
     pattern = re.compile(r"(?<!\w)" + re.escape(needle) + r"(?!\w)")
     return [(m.start(), m.end()) for m in pattern.finditer(note)]
 
 
 def load_patients(limit: int) -> tuple[list[dict], dict[str, list[str]]]:
-    """Patient details, plus every visit date per patient.
-
-    Visit dates matter more than anything else here. Measured on one note:
-    89 dates present, of which birth date is ONE. Building the answer sheet
-    from silver.patient alone would mark 88 of 89 real dates as "not private",
-    so every program would be punished for finding them.
-    """
+    """Patient details plus every visit date (88 of 89 dates in a note are visits)."""
     columns = sorted({c for cols in COLUMNS.values() for c in cols})
     select = ", ".join(columns)
     with dbx.connect() as conn, conn.cursor() as cur:
@@ -126,13 +96,7 @@ def load_patients(limit: int) -> tuple[list[dict], dict[str, list[str]]]:
         header = [d[0] for d in cur.description]
         patients = [dict(zip(header, row, strict=True)) for row in cur.fetchall()]
 
-        # America/Chicago, not UTC. Synthea wrote the notes in local time but
-        # the CSV stores UTC with a Z, so an evening appointment in Chicago is
-        # the next day in UTC. Using to_date() directly cost 11% of all dates
-        # overall and 94% for one patient, because Synthea gives each patient
-        # a consistent appointment hour — so the error clusters per patient
-        # instead of averaging out. The timezone is the one pinned in
-        # synthea/Dockerfile (decision.md D35).
+        # Chicago days, not UTC: notes are local time, and UTC lost 11% of dates (D35).
         ids = "', '".join(p["patient_id"] for p in patients)
         cur.execute(
             "SELECT patient_id, "
@@ -169,18 +133,14 @@ def main() -> None:
         note = path.read_text(encoding="utf-8", errors="replace")
 
         for category, columns in COLUMNS.items():
-            # A set: 3 patients have FIRST == MIDDLE, which wrote every one of
-            # their name positions twice (902 duplicate rows). A program that
-            # finds the name once would have been marked as missing it once.
+            # A set: some patients have FIRST == MIDDLE, which would double-count positions.
             values = {(patient.get(c) or "").strip() for c in columns} - {""}
             for value in sorted(values):
                 for start, end in find_all(note, value):
                     spans.append((patient["patient_id"], start, end,
                                   category, value))
 
-        # Birth, death, and every visit. A set, because a patient can have
-        # several encounters on one day and 12/11/1971 is both the padded and
-        # unpadded form — either would record the same position twice.
+        # A set: same-day encounters and padded/unpadded forms repeat positions.
         dates = {patient.get("birth_date_str"), patient.get("death_date_str")}
         dates.update(visits.get(patient["patient_id"], []))
         wanted = {form for d in dates if d for form in date_forms(d)}
@@ -189,9 +149,7 @@ def main() -> None:
                 spans.append((patient["patient_id"], match.start(),
                               match.end(), "date", match.group()))
 
-        # Safe Harbor only requires suppressing ages OVER 89. An age of 55 is
-        # not an identifier, so matching every "NN year-old" would flood the
-        # answer sheet with things that are not private.
+        # Safe Harbor only covers ages over 89.
         for match in re.finditer(r"\b(\d{2,3}) year-old", note):
             if int(match.group(1)) > 89:
                 spans.append((patient["patient_id"], match.start(1),

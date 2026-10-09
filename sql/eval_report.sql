@@ -1,5 +1,4 @@
--- Phase 5: scores by tier, and every failure with its evidence. Change the
--- run_id in both statements to the run being read.
+-- Phase 5: scores by tier and every failure; set run_id in both statements.
 
 SELECT contestant, tier,
        count_if(verdict = 'correct') AS correct, count(*) AS asked

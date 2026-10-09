@@ -1,6 +1,4 @@
-"""The medallion DAG's PHI gate copies governance_check.sql's CHECK 3 (the
-DAG folder cannot read sql/). A PHI column added to one and not the other
-would pass the gate and fail the check, or the reverse (D81)."""
+"""The DAG's PHI gate and governance_check.sql's CHECK 3 must list the same columns (D81)."""
 import re
 from pathlib import Path
 

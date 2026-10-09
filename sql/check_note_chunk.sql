@@ -1,5 +1,4 @@
--- Phase 3b step 2 checks. Run with:
---   .venv/Scripts/python.exe -m scripts.run_sql sql/check_note_chunk.sql
+-- Phase 3b step 2 checks: python -m scripts.run_sql sql/check_note_chunk.sql
 
 -- 1. Shape. Expect ~193,000 pieces across 1,148 patients.
 SELECT count(*) AS pieces,
@@ -8,10 +7,7 @@ SELECT count(*) AS pieces,
        max(length(chunk_text)) AS max_piece_chars
 FROM healthcare_dev.silver.note_chunk;
 
--- 2. The check that matters: glue the pieces back and compare to the original.
---    Only the first 1800 characters of each piece are taken, so the 200-char
---    overlap is not counted twice. sort_array on a struct sorts by its first
---    field, which is why chunk_index is first.
+-- 2. Glue each piece's first 1800 characters back together and compare to the original.
 WITH rebuilt AS (
     SELECT patient_id,
            concat_ws('', transform(

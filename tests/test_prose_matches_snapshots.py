@@ -1,6 +1,4 @@
-"""The home page's one-line findings are typed by hand (app/ui.py CHAPTERS);
-the numbers under them come from the snapshots. After a rerun those can part
-company silently, as chapter 5's did in D80. This fails when they do (D81)."""
+"""The hand-typed home-page findings must match the snapshots (D80, D81)."""
 from pathlib import Path
 
 import pandas as pd

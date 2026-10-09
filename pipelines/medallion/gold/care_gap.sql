@@ -1,8 +1,4 @@
--- Three HEDIS-style measures: who should get something (denominator), who
--- got it (numerator), who is excused (one column per exclusion). Measured
--- over the last complete calendar year (probe P5: 2025). Days are calendar
--- days in America/Chicago, as in readmission_events: in UTC, 54 tests and
--- prescriptions near New Year fell in the wrong year (D81).
+-- Three HEDIS-style measures over the last complete year, on Chicago calendar days (D81).
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.care_gap (
     -- A duplicated patient-measure fails here, before the table is replaced (E59).
@@ -19,12 +15,9 @@ WITH period AS (
           FROM ${catalog}.silver.encounter)
 ),
 
--- Had the condition at some point during the year, and was alive when it
--- began. Synthea rarely closes a diagnosis, so without the second rule
--- everyone who ever died with one would sit in the population as "died".
+-- Had the condition during the year and was alive when it began.
 denominator AS (
-    -- GROUP BY with a count, not SELECT DISTINCT: inside the pipeline a DISTINCT
-    -- CTE that is joined afterwards stopped removing duplicates (E58, E59).
+    -- GROUP BY, not DISTINCT: a joined DISTINCT CTE stopped deduplicating in the pipeline (E58, E59).
     SELECT c.patient_id, mc.measure, count(*) AS condition_rows
     FROM ${catalog}.silver.condition c
     JOIN ${catalog}.gold.measure_code mc
@@ -48,8 +41,7 @@ hba1c_done AS (
     GROUP BY o.patient_id
 ),
 
--- Blood pressure is two observations taken together. Pair them by moment,
--- keep the last pair of the year, and judge that one.
+-- Blood pressure: pair the two readings by moment and judge the year's last pair.
 bp_pairs AS (
     SELECT o.patient_id, o.observed_at,
            max(CASE WHEN o.source_code = '8480-6' THEN o.value_number END) AS systolic,
@@ -111,8 +103,7 @@ flagged AS (
     LEFT JOIN statin_taken st  ON st.patient_id = d.patient_id
 ),
 
--- HEDIS age bands, simplified: diabetes 18-75, blood pressure 18-85,
--- statins 21-75.
+-- HEDIS age bands, simplified.
 aged AS (
     SELECT *,
            NOT CASE measure

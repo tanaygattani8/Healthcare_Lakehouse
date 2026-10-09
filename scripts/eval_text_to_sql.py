@@ -1,11 +1,4 @@
-"""Ask each contestant every question, run its SQL, record a verdict (spec §4).
-
-    .venv/Scripts/python.exe -m scripts.eval_text_to_sql --set dev --run-id dev-1 \\
-        --contestants answer_key,raw,metrics [--genie-space <id>]
-
-Resumable: a rerun with the same --run-id skips answers already recorded.
-Only verdicts are stored, never result values.
-"""
+"""Ask each contestant every question, run its SQL, store a verdict; resumable by --run-id."""
 
 from __future__ import annotations
 
@@ -35,10 +28,7 @@ Tables:
 
 Question: {question}"""
 
-# D67: the first note read as "always select the dimensions", and never said
-# what MEASURE() accepts; 7 of metrics' 11 dev-1 failures came from that.
-# D74: after phase 8 added two views, it wrote "GROUP BY ALL age_band" (dev-3,
-# dev-4), so the note now says nothing follows GROUP BY ALL.
+# Wording fixed after failures: what MEASURE() accepts (D67), nothing after GROUP BY ALL (D74).
 METRICS_NOTE = """The tables are metric views. In a query on a metric view:
 - MEASURE() takes only the name of a measure, such as MEASURE(stays). Put no
   expression or other function inside it; round or combine outside it, such as
@@ -53,8 +43,7 @@ SELECT MEASURE(stays) FROM healthcare_dev.metrics.stays WHERE is_planned"""
 
 
 def scrub(message: object) -> str:
-    """Error text for storage, with no data values (spec §4): just the Databricks
-    error class if there is one, else the first line with quoted literals masked."""
+    """Error text with no data values: the error class, else the first line with literals masked."""
     text = str(message)
     if m := re.search(r"\[[A-Z_.]+\]", text):
         return m.group(0)
@@ -157,8 +146,7 @@ def main() -> None:
     questions = load(path)
 
     with dbx.connect() as conn, conn.cursor() as cur:
-        # A run cut short by the cap must lose nothing: errored answers are retried
-        # (same pattern as scripts/detect_llm.py deleting NULL replies).
+        # Errored answers are retried, so a run cut short by the cap loses nothing.
         names = ", ".join(f"'{c}'" for c in contestants)    # from the fixed allow-list
         cur.execute("DELETE FROM healthcare_dev.ops.eval_run WHERE run_id = :run_id "
                     f"AND verdict = 'error' AND contestant IN ({names})",
@@ -166,15 +154,13 @@ def main() -> None:
         cur.execute("SELECT contestant, question_id FROM healthcare_dev.ops.eval_run "
                     "WHERE run_id = :run_id", {"run_id": args.run_id})
         done = {tuple(row) for row in cur.fetchall()}
-        # Each context is built only when its contestant runs (metric_views.sql
-        # may not exist yet; the raw schema costs a query).
+        # Contexts are built lazily, only when their contestant runs.
         contexts = {}
         if "raw" in contestants:
             contexts["raw"] = (gold_schema(cur), "")
         if "metrics" in contestants:
             contexts["metrics"] = (METRIC_VIEWS.read_text(encoding="utf-8"), METRICS_NOTE)
-        # Defence in depth: the gate already blocks unqualified table names, but
-        # if one slipped through it would resolve to a metric view, never silver.
+        # Defence in depth: an unqualified name resolves to a metric view, never silver.
         cur.execute("USE healthcare_dev.metrics")
 
         for q in questions:

@@ -51,8 +51,7 @@ def test_interval_status():
 
 
 def test_a_count_that_is_mostly_zero_still_shows_its_shift():
-    # 95% zeros collapse the quantile edges to [0, 1]; with right-closed bins
-    # 0, 1 and 2 shared a bin and this read PSI 0.
+    # 95% zeros collapse the edges to [0, 1]; right-closed bins once read PSI 0 here.
     train = [0] * 950 + [1] * 40 + [2] * 10
     prod = [0] * 500 + [1] * 300 + [3] * 200
     assert drift.status(drift.psi(train, prod, "number")) == "shifted"

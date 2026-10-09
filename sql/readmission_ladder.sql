@@ -1,9 +1,4 @@
--- Check C ladder: switch each change on one at a time, from the gate (B) to
--- the real table. v2 = merge stays; v3 = + local days; v4 = + data ends at
--- the last visit of any kind; v5 = + planned returns do not count; v6 = +
--- a cancer treatment stay is planned; v7 = + it cannot start a window
--- either (D64); v8 = + a return for scheduled heart surgery is planned
--- (D68) (= table).
+-- Check C ladder, gate to table one change at a time: v2 merge, v3 local days, v4 data end, v5-v8 planned rules (D64, D68).
 WITH variant AS (
     SELECT * FROM VALUES (2, false, false, false, false, false, false),
                          (3, true, false, false, false, false, false),

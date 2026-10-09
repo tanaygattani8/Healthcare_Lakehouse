@@ -15,8 +15,7 @@ SELECT
     e.PROVIDER                                    AS provider_id,
     e.PAYER                                       AS payer_id,
 
-    -- The reason for the visit is a SNOMED code, so it joins dim_code like
-    -- any other clinical code rather than living here as loose text.
+    -- The visit reason is a SNOMED code, joined via dim_code.
     d.code_key                                    AS reason_code_key,
     e.REASONDESCRIPTION                           AS reason_description,
 

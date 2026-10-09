@@ -1,6 +1,4 @@
--- One row per patient, everything about them in one place. No names,
--- addresses or identifier numbers, and no income or spend (near-unique per
--- person, D56). Age is capped at 90: Safe Harbor groups every age over 89.
+-- One row per patient: no identifiers, income or spend (D56); age capped at 90.
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.patient_360 (
     -- Safe Harbor: every age over 89 is grouped, so 90 is the ceiling.
@@ -14,8 +12,7 @@ WITH data_end AS (
     SELECT to_date(from_utc_timestamp(max(started_at), 'America/Chicago')) AS last_day
     FROM ${catalog}.silver.encounter
 ),
--- From fact_encounter, not silver: its money is already DECIMAL, so these
--- totals equal the fact table's in any engine.
+-- From fact_encounter, so totals match it in any engine.
 visits AS (
     SELECT patient_id,
            count(*)                                    AS encounters,

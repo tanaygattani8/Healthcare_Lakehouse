@@ -1,13 +1,4 @@
-"""Batch 2's hospitals, doctors and insurers, less the ones batch 1 already
-has (decision.md D65).
-
-A second Synthea run with the same clinician seed reuses most reference ids.
-Uploading them again would put two rows per id into bronze, so batch 2's
-files are rewritten in place to hold only the new ids; for a shared id,
-batch 1's row stays the one in the lakehouse. Rerunning changes nothing.
-
-    .venv/Scripts/python.exe -m scripts.new_reference_rows synthea/output synthea/output_b2
-"""
+"""Rewrite batch 2's reference files to hold only ids batch 1 lacks (D65); rerun-safe."""
 
 from __future__ import annotations
 

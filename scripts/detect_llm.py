@@ -1,16 +1,4 @@
-"""Program 3: ask the language model what is private, then find the text ourselves.
-
-Two steps, so a parsing bug never costs another round of model calls:
-
-  ask    one SQL statement per test-set patient sends every piece of their
-         note through ai_query, and stores the raw replies in ops.llm_reply.
-         Patients already stored are skipped, so it is safe to re-run.
-  parse  reads the replies back, finds each returned text in its piece, and
-         writes data/detections/llm.csv for sql/load_detections.sql.
-
-The model's own positions are never asked for. Measured in D48, it named the
-right things and put two of three in the wrong place.
-"""
+"""Program 3: `ask` stores ai_query replies; `parse` finds the named text itself (D48)."""
 
 from __future__ import annotations
 
@@ -40,13 +28,7 @@ ALIASES = {"location": "geography", "place": "geography", "person": "name",
 
 
 def spans_for(chunk: str, reply: str) -> tuple[list[tuple[int, int, str, str]], str]:
-    """Positions of everything the model named, and how the reply went.
-
-    Every occurrence is returned, not the first: if the model says
-    '2017-10-13' and it appears nine times in the piece, all nine are private.
-    Whole-word, like the answer sheet, so 'Ann' does not hit 'planned'.
-    No minimum length — that rule dropped real two-letter names (errors E41).
-    """
+    """Every whole-word position of everything the model named, and how the reply went (E41)."""
     try:
         items = json.loads(reply[reply.index("["): reply.rindex("]") + 1])
     except ValueError:                   # no brackets, or not valid JSON
@@ -82,11 +64,7 @@ def ask() -> None:
         todo = [row[0] for row in cur.fetchall()]
         print(f"{len(todo)} patients with pieces still to ask")
         for n, patient_id in enumerate(todo, 1):
-            # One statement per patient: Databricks runs the calls inside it in
-            # parallel, and a failure loses one patient, not the whole run.
-            # No LIMIT anywhere near ai_query: with ORDER BY ... LIMIT outside
-            # it, the model was called on every row and all but a few thrown
-            # away (errors.md E43).
+            # One statement per patient; no LIMIT near ai_query, it called every row (E43).
             cur.execute(f"""
                 INSERT INTO healthcare_dev.ops.llm_reply
                 SELECT patient_id, chunk_index, answer.result, answer.errorMessage
@@ -127,8 +105,7 @@ def parse() -> None:
                          "phi_category", "surface_text"])
         writer.writerows(("llm", *span) for span in sorted(spans))
 
-    # Report all of these. A program that quietly drops broken replies looks
-    # more accurate than it is.
+    # Report all of these: silently dropping broken replies flatters accuracy.
     print(f"{len(rows)} replies: {status}")
     print("'not_in_note' = at least one returned text is not in the piece verbatim")
     print(f"{len(spans)} spans written to {OUT}")

@@ -1,8 +1,6 @@
--- Phase 3b step 6 — does the de-identified copy hold? Every number marked
--- "must be 0" is a failure if it is not. Counts only.
+-- Phase 3b step 6: does the de-identified copy hold? Every "must be 0" is a failure otherwise.
 
--- One key per patient. The build inserts only missing patients, so a rerun
--- must not add a second shift — two shifts would break the timing check.
+-- One key per patient: a second shift would break the timing check.
 SELECT count(*) AS patients, count(DISTINCT patient_id) AS keyed,
        count(*) - count(DISTINCT patient_id) AS duplicate_keys_must_be_0,
        min(offset_days) AS min_shift, max(offset_days) AS max_shift
@@ -13,9 +11,7 @@ SELECT (SELECT count(*) FROM healthcare_dev.deid.patient)   AS patients,
        (SELECT count(*) FROM healthcare_dev.silver.encounter) AS encounters_in_silver,
        (SELECT count(*) FROM healthcare_dev.deid.note)      AS notes;
 
--- Timing. The plan compared only first-to-last span per patient, which a
--- per-row shift could pass by luck. This compares every gap between
--- consecutive visits, in order.
+-- Timing: every gap between consecutive visits, not just first-to-last.
 WITH before AS (
     SELECT k.deid_id,
            array_sort(collect_list(e.started_at)) AS ts
@@ -39,8 +35,7 @@ SELECT count(*) AS patients_compared,
        sum(CASE WHEN gb <> ga THEN 1 ELSE 0 END) AS patients_whose_timing_changed_must_be_0
 FROM gaps;
 
--- Names left in notes. The patient's first name, as a whole word, anywhere in
--- their de-identified note.
+-- Names left in notes: the patient's first name as a whole word.
 SELECT count(*) AS notes_checked,
        sum(CASE WHEN d.note_text RLIKE concat('(?<![A-Za-z])', p.FIRST, '(?![A-Za-z])')
                 THEN 1 ELSE 0 END) AS notes_still_naming_patient_must_be_0,

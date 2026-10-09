@@ -1,28 +1,11 @@
--- Phase 3b step 6 — the de-identified copy, in the deid schema.
---
--- gold keeps reading the real silver. If gold used this copy, every mistake in
--- it would quietly become a wrong analytics number.
---
--- What is kept, changed, or dropped (decision.md D55):
---   names, SSN, licence, passport, address, city, county, FIPS, coordinates,
---   birthplace, file names ............ dropped from tables; [NAME] in notes
---   birth and death date .............. 5-year band; blank if fewer than 5
---                                       people share band + gender + death
---                                       band (step 7, k >= 5); blank for 90+
---   ZIP ............................... dropped. Safe Harbor allows 3 digits,
---                                       but with them 471 of 1,148 people were
---                                       alone in their group (decision.md D56)
---   encounter and note dates .......... moved by one random number of days per
---                                       patient, so every gap between visits
---                                       is unchanged. NOT Safe Harbor, which
---                                       allows the year only — the standard
---                                       research compromise, said out loud.
---   patient_id ........................ replaced by a new random deid_id
+-- Phase 3b step 6: the de-identified copy; gold keeps reading real silver (D55).
+-- Names, identifiers, address, coordinates, birthplace, file names: dropped; [NAME] in notes.
+-- Birth and death dates: 5-year band, blank when k < 5 or age 90+ (D56).
+-- ZIP: dropped; even 3 digits left 471 of 1,148 people alone (D56).
+-- Visit and note dates: one random shift per patient, gaps kept; not Safe Harbor.
+-- patient_id: replaced by a random deid_id.
 
--- The secrets. One row per patient: a new id and a random shift, drawn ONCE
--- and kept. The plan computed the shift from hash(patient_id) and kept
--- patient_id in the copy — anyone with the copy and this repo could undo it.
--- Lives in ops, never in deid, and never leaves the lakehouse.
+-- The secrets: a random id and shift per patient, drawn once; ops only, never deid.
 CREATE TABLE IF NOT EXISTS healthcare_dev.ops.deid_key (
     patient_id  STRING,
     deid_id     STRING,
@@ -36,8 +19,7 @@ SELECT p.patient_id, uuid(), cast(floor(rand() * 364) + 1 AS INT)
 FROM healthcare_dev.silver.patient p
 LEFT ANTI JOIN healthcare_dev.ops.deid_key k USING (patient_id);
 
--- Replaces private text inside a note, working from the end so earlier
--- positions stay valid. Overlapping spans keep the first-starting, longest.
+-- Replace spans from the end so positions stay valid; overlaps keep the first, longest.
 CREATE OR REPLACE FUNCTION healthcare_dev.ops.deid_text(
     note STRING, spans ARRAY<STRUCT<s: INT, e: INT, k: STRING, t: STRING>>, shift INT)
 RETURNS STRING
@@ -86,8 +68,7 @@ banded AS (
            CASE WHEN age <= 89 THEN cast(floor(year(death_date) / 5) * 5 AS INT) END AS death_band
     FROM aged
 ),
--- k = how many people share this combination. Below 5, the bands are blanked
--- (step 7, decision.md D56). The blanked people then share one large group.
+-- Bands blanked when fewer than 5 people share them (D56).
 counted AS (
     SELECT *, count(*) OVER (PARTITION BY birth_band, GENDER, death_band) AS k
     FROM banded
@@ -99,9 +80,7 @@ SELECT deid_id,
        k < 5 AS years_suppressed,
        is_deceased, GENDER AS gender, RACE AS race, ETHNICITY AS ethnicity,
        MARITAL AS marital, STATE AS state
--- No income or healthcare spend: each is close to unique per person (D56), so
--- either would pick people out whatever k says. Dropped after the audit; the
--- live table lost them by ALTER, not a rebuild, so its bands did not move (D81).
+-- No income or spend: near-unique per person (D56, D81).
 FROM counted;
 
 CREATE OR REPLACE TABLE healthcare_dev.deid.encounter

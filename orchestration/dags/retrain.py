@@ -1,9 +1,4 @@
-"""Retraining on drift, one cursor per run (phase 9, spec §3.4).
-
-Manually triggered only, like medallion: one run per yearly cursor, with
-`as_of` and `mode` in the trigger. Nothing trains until gold has passed its
-gates (D73). The snapshot stays a manual step (D36).
-"""
+"""Retrain on drift, one cursor per manual run, only after gold passed its gates (D73)."""
 
 import json
 import os
@@ -23,8 +18,7 @@ FINISHED = {"COMPLETED", "FAILED", "CANCELED"}
 
 with DAG(
     dag_id="retrain",
-    # Never scheduled, for the same reason as medallion: a quota lockout
-    # while nobody is watching. One run per cursor, in order, by hand.
+    # Never scheduled, like medallion: one run per cursor, in order, by hand.
     schedule=None,
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
@@ -40,9 +34,7 @@ with DAG(
 
     @task
     def gold_is_gated():
-        """Fail unless no pipeline update is running and the latest real one
-        (not validate-only) COMPLETED. A failed gate fails its update, so
-        COMPLETED means gold passed its gates (D73)."""
+        """Fail unless nothing is running and the latest real update COMPLETED (D73)."""
         updates = DatabricksHook(CONN)._do_api_call(
             ("GET", f"{API}/pipelines/{PIPELINE}/updates"), {"max_results": 25})["updates"]
         running = [u for u in updates if u["state"] not in FINISHED]

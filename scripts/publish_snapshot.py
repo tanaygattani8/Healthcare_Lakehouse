@@ -23,9 +23,7 @@ from scripts.readmission_story import (
 )
 from scripts.text_to_sql_score import VERDICTS
 
-# Silver tables and the ops.quarantine_* table each one feeds. Kept here rather
-# than derived from ENTITIES because silver names are singular and do not map
-# one-to-one onto the bronze entity list.
+# Listed, not derived from ENTITIES: silver names are singular and don't map one-to-one.
 SILVER_TABLES = [
     "patient", "encounter", "condition", "observation", "medication",
     "procedure", "immunization", "allergy", "careplan",
@@ -58,16 +56,13 @@ def fetch_counts(catalog: str, entities: list[str]) -> pd.DataFrame:
     return df
 
 
-# Phase 3b: how well patient details were hidden. Both tables hold counts and
-# category labels only, and check_only_categories() refuses anything else — a
-# de-identification page that leaked a name would be the worst possible bug.
+# Phase 3b: counts and category labels only; check_only_categories() refuses anything else.
 DEID_SNAPSHOTS = {
     "deid_scores": "SELECT stage, phi_category, real_items, guesses, precision, "
                    "recall, covered_recall, exact_recall FROM {catalog}.ops.detection_score",
     "deid_kanon": "SELECT version, k, groups, people FROM {catalog}.ops.kanon_spread",
 }
-# Phase 4: gold, which is as private as silver (exact visit dates), so counts
-# per measure only, never a row per patient or per stay.
+# Phase 4: gold is as private as silver, so counts per measure only.
 GOLD_SNAPSHOTS = {
     "gold_care_gap": (
         "SELECT measure, measure_year, count(*) AS in_denominator, "
@@ -78,9 +73,7 @@ GOLD_SNAPSHOTS = {
         "count_if(gap) AS gaps "
         "FROM {catalog}.gold.care_gap GROUP BY measure, measure_year"),
 }
-# Phase 5: the readmission story, read from the metric views so the page
-# shows the numbers defined there. Counts per signal level only; a level
-# with 1-10 stays or readmissions is hidden, with a complement (D66).
+# Phase 5: counts per signal level; 1-10 levels hidden with a complement (D66).
 STORY_TOTALS = """
 SELECT s.*, r.* FROM
   (SELECT MEASURE(stays) AS stays, MEASURE(encounters_merged) AS encounters_merged,
@@ -97,16 +90,14 @@ CROSS JOIN
    FROM {catalog}.metrics.readmission) r"""
 STORY_MEASURES = "MEASURE(index_stays), MEASURE(readmitted), MEASURE(readmitted_patients)"
 
-# Phase 5: verdict counts only. The run number is published, not the run id
-# text; the harness forces run ids to dev-N / test-N.
+# Phase 5: verdict counts only; run ids are dev-N / test-N, so only N is published.
 EVAL_SNAPSHOTS = {
     "eval_scores": (
         "SELECT set_name, CAST(split(run_id, '-')[1] AS INT) AS run_no, "
         "contestant, tier, verdict, count(*) AS answers "
         "FROM {catalog}.ops.eval_run GROUP BY ALL"),
 }
-# Phase 6: the model's comparison and drift, from the ml tables the notebooks
-# write. The latest drift run only; earlier runs are history for phase 8.
+# Phase 6: model comparison and the latest drift run.
 MODEL_RESULTS = "SELECT * FROM {catalog}.ml.model_results"
 MANIFEST = ("SELECT current_timestamp() AS captured_at, "
             "to_date(from_utc_timestamp(max(started_at), 'America/Chicago')) AS data_through "
@@ -116,8 +107,7 @@ MODEL_DRIFT = ("SELECT drift_check, period, subject, value, low, high, status "
                "WHERE run_at = (SELECT max(run_at) FROM {catalog}.ml.drift_report)")
 MODEL_TEXT = {"population", "patients", "scorer", "model_kind", "model_version", "model_verdict",
               "cutoff_verdict"}
-# Phase 9: the retraining loop's decisions. ml.retrain_history holds rates and
-# verdicts only (D75); the stay count per window is in the hundreds.
+# Phase 9: retraining decisions, rates and verdicts only (D75).
 RETRAIN_HISTORY = (
     "SELECT as_of, mode, champion_version, check_stays, target, champion_rate, "
     "champion_low, champion_high, triggered, cutoff_rate, cutoff_workload, retrain_rate, "
@@ -125,8 +115,7 @@ RETRAIN_HISTORY = (
     "FROM {catalog}.ml.retrain_history ORDER BY written_at")
 RETRAIN_TEXT = {"mode", "champion_version", "cutoff_workload", "retrain_workload",
                 "retrain_ranking", "outcome", "new_version", "shifted_features", "triggered"}
-# The five commonest admit reasons (Task 2 Step 5), pasted, so the guard
-# stays a fixed list. A new name stops the publish until it is checked.
+# Fixed list: a new admit reason stops the publish until it is checked.
 ADMIT_REASONS = {
     "Dependent drug abuse (disorder)",
     "Sterilization requested (situation)",
@@ -134,15 +123,13 @@ ADMIT_REASONS = {
     "Appendicitis (disorder)",
     "Sleep disorder (disorder)",
 }
-# Phase 8's dashboard (D74), default view: every filter "All". Its own SQL, so
-# the app shows what the dashboard shows and shown() runs in one place.
+# Phase 8 dashboard's default view (D74), run from its own exported SQL.
 BOARD = Path(__file__).resolve().parents[1] / "dashboards" / "operations.lvdash.json"
 OPS_DATASETS = ("kpi_visits", "kpi_stays", "kpi_readmission", "visits_trend",
                 "stays_trend", "by_payer", "by_hospital")
 OPS_WINDOW = ("SELECT window_start, last_month, prior_start, prior_end "
               "FROM {catalog}.metrics.kpi_window")
-# Synthea's hospitals and insurers are real names. Synthetic costs beside them
-# would read as claims about them, so only government programmes keep a name.
+# Synthea's hospital and insurer names are real; only government programmes keep theirs.
 PROGRAMMES = {"Medicare": "Medicare", "Medicaid": "Medicaid", "Dual Eligible": "Dual Eligible",
               "NO_INSURANCE": "No insurance"}
 VISIT_TYPES = {"ambulatory", "emergency", "inpatient", "other", "outpatient", "urgentcare",
@@ -195,9 +182,7 @@ def check_only_categories(df: pd.DataFrame) -> None:
 
 
 def fetch_story_levels(cur, catalog: str) -> pd.DataFrame:
-    """Every signal level against the rest of the index stays. Signal names
-    come from the fixed SIGNALS dict, never from input; the level is a bound
-    parameter."""
+    """Every signal level against the rest; signals come from SIGNALS, levels are bound."""
     view = f"{catalog}.metrics.readmission"
     rows = []
     for signal in SIGNALS:
@@ -216,9 +201,7 @@ def fetch_story_levels(cur, catalog: str) -> pd.DataFrame:
 
 
 def check_small_cells(levels: pd.DataFrame) -> None:
-    """Stop before writing if a published level breaks D66: a shown count of
-    1-10, a signal with exactly one hidden level, or hidden levels that hold
-    1-10 stays or readmissions between them (D79)."""
+    """Refuse a shown 1-10, one hidden level, or hidden levels summing to 1-10 (D66, D79)."""
     shown = levels[~levels["suppressed"]]
     for column in ("index_stays", "readmitted", "rest_stays", "rest_readmitted"):
         if shown[column].between(1, SUPPRESS_BELOW - 1).any():
@@ -235,27 +218,22 @@ def check_small_cells(levels: pd.DataFrame) -> None:
 
 
 def _numbers(df: pd.DataFrame, text: set[str]) -> pd.DataFrame:
-    # The SQL connector returns NULL as None, which makes a number column
-    # object-typed, and check_only_categories would read it as text.
+    # NULLs make number columns object-typed, which check_only_categories reads as text.
     numeric = [c for c in df.columns if c not in text]
     return df.astype(dict.fromkeys(numeric, float))
 
 
 def publish_model_results(results: pd.DataFrame) -> pd.DataFrame:
-    """Hide a recall built on 1-10 readmissions caught or missed (D66), then
-    drop every count, so no count reaches the parquet (decision P-d)."""
+    """Hide recalls on 1-10 caught or missed (D66), then drop every count."""
     results = _numbers(results, MODEL_TEXT)
     small = (results["caught"].between(1, SUPPRESS_BELOW - 1)
              | results["missed"].between(1, SUPPRESS_BELOW - 1))
-    # The rule is 0/1, so its average precision (c^2/(R*F) + (R-c)/N) and its
-    # Brier score are functions of the counts: hidden with its recall (D72).
-    # The model's are ranking and calibration scores, and stay.
+    # The 0/1 rule's average precision and Brier are functions of its counts (D72).
     rule_small = small & (results["scorer"] == "rule")
     results = results.assign(recall=results["recall"].mask(small),
                              avg_precision=results["avg_precision"].mask(rule_small),
                              brier=results["brier"].mask(rule_small))
-    # A new/returning breakdown publishes its verdict only: its base-rate
-    # precision is readmitted / stays, and some breakdowns hold 1-10 (D72).
+    # Breakdowns publish verdicts only; some hold 1-10 (D72).
     numbers = [c for c in results.columns if c not in MODEL_TEXT]
     results.loc[results["patients"] != "all", numbers] = np.nan
     # Rounded, so no published rate can be turned back into exact counts.
@@ -264,19 +242,14 @@ def publish_model_results(results: pd.DataFrame) -> pd.DataFrame:
 
 
 def publish_drift(drift: pd.DataFrame) -> pd.DataFrame:
-    # Three decimals: an exact training rate (k / n), with the published
-    # totals, would give the 1-10 gap readmissions back by subtraction (D72).
-    # The training readmission rate is left out entirely: with the published
-    # totals it narrows the gap's 1-10 readmissions to a handful (D72). The
-    # 2020-2026 row's status still says whether training's rate fits.
+    # Training's readmission rate dropped, the rest rounded: either gives 1-10 back (D72).
     drift = drift[~((drift["drift_check"] == "readmission_rate")
                     & (drift["period"] == "training"))].reset_index(drop=True)
     return _numbers(drift, {"drift_check", "period", "subject", "status"}).round(3)
 
 
 def publish_retrain_history(history: pd.DataFrame) -> pd.DataFrame:
-    """The retraining loop's rows (D75), refused if anything in them is not a
-    rate, a known label or a feature name, or if a count could be 1-10."""
+    """Retraining rows (D75), refused on unknown text or an implied 1-10 count."""
     history = _numbers(history.assign(as_of=pd.to_datetime(history["as_of"]),
                                       triggered=history["triggered"].astype(bool)),
                        RETRAIN_TEXT | {"as_of"})
@@ -308,8 +281,7 @@ def _ops_frame(df: pd.DataFrame, text: set[str] = frozenset(),
 
 
 def publish_ops(raw: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
-    """The dashboard's default view with made-up hospital and insurer names,
-    refused if a count is 1-10 or subtraction against a tile gives one back."""
+    """Dashboard default view with made-up names, refused if any count or subtraction gives 1-10."""
     kpi = pd.concat([raw[n] for n in ("kpi_visits", "kpi_stays", "kpi_readmission",
                                       "kpi_window")], axis=1)
     # With no filter, share of network is always 100 and every network gap 0.
@@ -358,9 +330,7 @@ def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
                                               columns=[d[0] for d in cur.description])
         levels = fetch_story_levels(cur, catalog)
         short = shortlist(zip(levels["signal"], levels["separates"], strict=True))
-        # Decided on the real counts (D66), but not published for a hidden
-        # level: with the hidden sum, "separates" can pin which side of the
-        # rule a hidden level falls on (D81). The verdict below counts it.
+        # Masked on hidden levels: with the hidden sum it pins their side (D81).
         levels["separates"] = levels["separates"].astype("boolean").mask(levels["suppressed"])
         frames["story_levels"] = levels
         frames["story_verdict"] = pd.DataFrame({"decision": [verdict(short)],
@@ -382,25 +352,19 @@ def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
             cur.execute(query, params)
             raw[name] = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
         frames.update(publish_ops(raw))
-        # When this ran, and the last day the data covers, so a page can say
-        # how old it is (D81). Two dates, no numbers.
+        # Run time and data-through date, so pages can say how old they are (D81).
         cur.execute(MANIFEST.format(catalog=catalog))
         manifest = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
         frames["manifest"] = manifest.apply(pd.to_datetime)
     return frames
 
 
-# Every number column of every published file, and what it is (D81). A count
-# of people, stays, visits or readmissions must be 0 or 11+; every other role
-# says why its column is not one. A column with no role refuses the publish:
-# the per-frame guards above check what each frame was known to hold, and
-# this is what stops a new column, or a new frame, slipping past them.
+# Every published number column needs a role; a COUNT must be 0 or 11+ (D81).
 COUNT = "count"
 ROLES: dict[str, dict[str, str]] = {
     # rows per table; hospitals, providers and payers count businesses (BUSINESS)
     "bronze_counts": {"rows": COUNT},
-    # The size of each k-anonymity group, and how many people sit in groups of
-    # that size, for a copy never released. A size names no one (D81).
+    # k-anonymity group sizes for a copy never released; a size names no one (D81)
     "deid_kanon": {"groups": "class size", "people": "class size"},
     # name, date and other spans found in 25 test patients' notes: text, not people
     "deid_scores": {"real_items": "text spans", "guesses": "text spans", "precision": "rate",
@@ -449,8 +413,7 @@ BUSINESS = {"organizations", "providers", "payers"}
 
 
 def check_roles(frames: dict[str, pd.DataFrame]) -> None:
-    """Stop before writing anything if a number column has no declared role,
-    or a count of people, stays or visits is 1-10 (D66, D81)."""
+    """Refuse a number column with no role, or a count of 1-10 (D66, D81)."""
     for name, df in frames.items():
         for column in df.select_dtypes(include="number").columns:
             role = ROLES.get(name, {}).get(column)
@@ -469,8 +432,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("snapshots/bronze_counts.parquet"))
     args = parser.parse_args()
 
-    # Aggregates only. Quarantined rows are patient-shaped records; the public
-    # page gets counts, never a sample.
+    # Aggregates only: quarantine gets counts, never a sample.
     frames = {args.out.stem: fetch_counts(args.catalog, ENTITIES),
               **fetch_aggregates(args.catalog)}
     check_roles(frames)   # every frame, before any file is written

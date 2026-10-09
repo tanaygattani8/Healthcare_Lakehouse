@@ -1,10 +1,4 @@
--- Row count and a hash sum for every gold table. Two runs that match mean
--- the same rows, whatever their order. The cast matters: a plain sum of
--- 64-bit hashes overflows, and with ANSI mode the warehouse raises an error.
--- key_copies (a gate column, E59) is left out, so runs from before and after
--- it was added compare. readmission_events' phase 8 columns are left out
--- the same way, so runs from before and after phase 8 compare. Kept after
--- phase 7: rerun it to show a change left gold untouched.
+-- Row count and an overflow-safe hash sum per gold table; gate and phase 8 columns left out.
 SELECT 'care_gap' AS t, count(*) AS rows, sum(cast(xxhash64(* EXCEPT (key_copies)) AS DECIMAL(38, 0))) AS fingerprint FROM healthcare_dev.gold.care_gap
 UNION ALL SELECT 'dim_date', count(*), sum(cast(xxhash64(*) AS DECIMAL(38, 0))) FROM healthcare_dev.gold.dim_date
 UNION ALL SELECT 'dim_organization', count(*), sum(cast(xxhash64(*) AS DECIMAL(38, 0))) FROM healthcare_dev.gold.dim_organization

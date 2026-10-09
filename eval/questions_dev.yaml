@@ -1,8 +1,4 @@
-# Dev set: used freely while building metric views and prompts (spec §7).
-# Written by Claude. Four questions per chapter of the readmission story;
-# every question states its unit and rounding.
-# Tiers: 1 one table / 2 filters, groups, joins / 3 a measure with its
-# exclusions or rule / 4 should refuse.
+# Dev set, used freely (tiers: 1 one table, 2 filters/joins, 3 a measure's rules, 4 should refuse).
 
 # Chapter 1. How big is the problem?
 - id: d01

@@ -1,29 +1,6 @@
--- Synthea's ten encounter classes, mapped to a canonical taxonomy.
---
--- A lookup table rather than a CASE expression inside a query, because
--- scripts/readmission_gate.py already carries its own hardcoded notion of
--- "inpatient". Two places deciding that will eventually disagree, and a table
--- makes the disagreement visible.
---
--- TWO DELIBERATE DEVIATIONS FROM THE SPEC, both flagged for review:
---
--- 1. The spec names three canonical classes (acute / ambulatory / preventive).
---    This adds a fourth, post_acute, for snf and hospice. Those are facility
---    stays, so calling them ambulatory is wrong, and they are not acute care
---    either. The spec listed five encounter classes; the data has ten
---    (docs/silver-model-findings.md), so it never considered these.
---
--- 2. readmission_role is a second column the spec does not mention. One column
---    cannot answer both "what kind of care was this" and "does this count
---    toward readmission" -- and conflating them is how a transfer to skilled
---    nursing silently becomes a readmission.
---
--- readmission_role values:
---   index_eligible      -- can start a 30-day readmission window
---   transfer_target     -- where patients go after discharge; arriving here is
---                          not a readmission
---   excluded            -- removed from the measure entirely
---   not_applicable      -- outpatient care, irrelevant to the measure
+-- Synthea's ten encounter classes in one lookup table, so readmission logic has one definition.
+-- Adds post_acute (snf, hospice) and readmission_role, beyond the spec.
+-- index_eligible starts a window; transfer_target is not a readmission; excluded and not_applicable never count.
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.encounter_class_map
 COMMENT "Synthea encounter class to canonical taxonomy and readmission role."
@@ -43,10 +20,7 @@ SELECT * FROM VALUES
 AS t(encounter_class, canonical_class, readmission_role);
 
 
--- Every encounter class in bronze must appear above. An unmapped class would
--- otherwise become NULL and quietly drop encounters out of every denominator.
--- This view must stay empty. The expectation was promised in phase 2 and
--- only attached in phase 7 (D73): any row fails the update.
+-- Must stay empty: an unmapped class fails the update (D73).
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.unmapped_encounter_class (
     CONSTRAINT every_class_mapped EXPECT (false) ON VIOLATION FAIL UPDATE
 )

@@ -1,16 +1,4 @@
--- Phase 3a, Task 1 step 6 — extend the same governance to quarantine.
---
--- ops.quarantine_patient keeps whole failed rows, on purpose: a dropped row
--- cannot be debugged. But keeping the row is the requirement, not keeping its
--- SSN readable, and a policy on SCHEMA silver does not reach schema ops.
---
--- The policies below are separate objects from the silver ones because a
--- policy is attached to exactly one securable. Same tag vocabulary, same mask
--- functions, so the two stay in step as long as both files are re-run
--- together after a full refresh.
---
--- ops.phi_clearance is deliberately untagged. The mask functions read it, and
--- masking the table that decides who is masked would be circular.
+-- Phase 3a: the same masks on ops quarantine; phi_clearance stays untagged (it decides who is masked).
 
 ALTER TABLE healthcare_dev.ops.quarantine_patient ALTER COLUMN SSN        SET TAGS ('phi_category' = 'ssn');
 ALTER TABLE healthcare_dev.ops.quarantine_patient ALTER COLUMN DRIVERS    SET TAGS ('phi_category' = 'license');

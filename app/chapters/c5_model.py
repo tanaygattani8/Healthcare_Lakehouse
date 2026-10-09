@@ -1,5 +1,4 @@
-"""Chapter 5: can a model beat one rule? The comparison and the drift, from
-the model snapshots (phase 6, D80). A recall on 1-10 caught or missed is hidden."""
+"""Chapter 5: can a model beat one rule? Comparison and drift (D80); 1-10 recalls hidden."""
 
 import altair as alt
 import pandas as pd

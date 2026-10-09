@@ -2,8 +2,7 @@ from scripts.run_sql import _statements
 
 
 def test_semicolon_in_a_comment_does_not_split_the_statement():
-    # The bug this exists for: a naive split on ';' cut the prose in half and
-    # sent "after tagging it would orphan them." to the warehouse as SQL.
+    # A naive split on ';' once sent half a comment to the warehouse.
     sql = """
 -- Safe to run now; after tagging it would orphan them.
 ALTER GOVERNED TAG phi_category SET VALUES ('name', 'date');
@@ -41,10 +40,7 @@ def test_escaped_quote_inside_a_string_is_not_the_end_of_it():
 
 
 def test_a_comment_after_code_on_the_same_line_still_terminates():
-    # The semicolon inside the trailing comment must not split anything. The
-    # comment itself rides along with the next statement, which is deliberate:
-    # run_sql prints a statement's first line as its label, and a leading
-    # comment is a better label than the SQL.
+    # The comment's ';' splits nothing; the comment rides with the next statement as its label.
     sql = "SELECT 1;  -- trailing note; with a semicolon\nSELECT 2;\n"
     assert _statements(sql) == [
         "SELECT 1",

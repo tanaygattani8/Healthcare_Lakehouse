@@ -1,6 +1,4 @@
--- One fact table, written completely first. The other six follow its shape
--- once this one is verified -- six near-identical tables written before the
--- first is checked is six copies of the same bug (errors.md E17).
+-- The first fact table, verified before the other six copied its shape (E17).
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.silver.v_condition AS
 SELECT
@@ -20,10 +18,7 @@ SELECT
         CASE WHEN TRY_CAST(c.START AS DATE) IS NULL THEN 'onset_unparseable' END,
         CASE WHEN TRY_CAST(NULLIF(c.STOP, '') AS DATE) < TRY_CAST(c.START AS DATE)
              THEN 'resolved_before_onset' END
-        -- Deliberately NOT checking that encounter_id resolves. 6.75% of
-        -- observations carry no encounter at all (silver-model-findings.md
-        -- section 4); the link to a visit is optional across the fact tables,
-        -- and the patient link is the one that must hold.
+        -- encounter_id may not resolve: the visit link is optional, the patient link must hold.
     ), x -> x IS NOT NULL)                 AS violations
 FROM ${catalog}.bronze.br_conditions c
 LEFT JOIN ${catalog}.silver.patient p

@@ -1,8 +1,6 @@
 -- Each metric view must give gold's known numbers (D58, and Task 2).
 
--- Expect stays 14313, encounters_merged 1382, excluded_died 173,
--- excluded_short_followup 30, excluded_hospice 0, excluded_cancer_treatment 3402,
--- index_stays 10724 (D65; the exclusions overlap).
+-- Expect 14313 stays, 1382 merged, 173 died, 30 short follow-up, 0 hospice, 3402 cancer, 10724 index (D65).
 SELECT MEASURE(stays), MEASURE(encounters_merged), MEASURE(excluded_died),
        MEASURE(excluded_short_followup), MEASURE(excluded_hospice),
        MEASURE(excluded_cancer_treatment), MEASURE(index_stays)
@@ -32,12 +30,10 @@ WHERE cast(prior_stays_12m_band AS STRING) <> '0';
 SELECT healthcare_dev.metrics.shown(5, 1.0), healthcare_dev.metrics.shown(11, 1.0),
        healthcare_dev.metrics.shown(0, 0.0), healthcare_dev.metrics.shown(NULL, 1.0);
 
--- Phase 8. The windows: four month starts, window_start 11 months before
--- last_month, prior_end 1 month before window_start.
+-- Phase 8 windows: window_start 11 months before last_month, prior_end 1 before window_start.
 SELECT * FROM healthcare_dev.metrics.kpi_window;
 
--- Phase 8. Visits: counted once, and the joins neither drop nor copy any.
--- Expect 0 in every column.
+-- Phase 8 visits: joins drop or copy none; expect 0 in every column.
 WITH total AS (SELECT MEASURE(visits) AS v FROM healthcare_dev.metrics.operations),
 by_hospital AS (SELECT hospital, MEASURE(visits) AS v FROM healthcare_dev.metrics.operations GROUP BY ALL),
 by_payer AS (SELECT payer, MEASURE(visits) AS v FROM healthcare_dev.metrics.operations GROUP BY ALL)
@@ -47,8 +43,7 @@ SELECT (SELECT v FROM total) - (SELECT count(*) FROM healthcare_dev.gold.fact_en
        (SELECT count_if(hospital IS NULL OR hospital = '') FROM by_hospital) AS unnamed_hospitals,
        (SELECT count_if(payer IS NULL) FROM by_payer) AS unnamed_payers;
 
--- Phase 8. Stays after the joins: every stay and every dollar once.
--- Expect 0 in every column.
+-- Phase 8 stays: every stay and dollar once; expect 0 in every column.
 WITH total AS (SELECT MEASURE(stays) AS n, MEASURE(stay_cost) AS c FROM healthcare_dev.metrics.stays),
 by_hospital AS (SELECT hospital, MEASURE(stays) AS n, MEASURE(stay_cost) AS c FROM healthcare_dev.metrics.stays GROUP BY ALL),
 by_payer AS (SELECT payer, MEASURE(stays) AS n FROM healthcare_dev.metrics.stays GROUP BY ALL)
@@ -60,14 +55,12 @@ SELECT (SELECT n FROM total) - (SELECT count(*) FROM healthcare_dev.gold.readmis
        (SELECT count_if(hospital IS NULL OR hospital = '') FROM by_hospital) AS unnamed_hospitals,
        (SELECT count_if(payer IS NULL) FROM by_payer) AS unnamed_payers;
 
--- Phase 8. Every hospital encounter's cost lands in exactly one stay: stay
--- costs add up to fact_encounter's index-eligible encounters. Expect 0.00.
+-- Phase 8: every hospital encounter's cost lands in exactly one stay; expect 0.00.
 SELECT (SELECT sum(stay_claim_cost) FROM healthcare_dev.gold.readmission_events)
      - (SELECT sum(total_claim_cost) FROM healthcare_dev.gold.fact_encounter
         WHERE readmission_role = 'index_eligible') AS stay_cost_vs_encounters_off;
 
--- Phase 8. care_gaps against care_gap, counted another way (closed = not a
--- gap). Expect one row per measure, both columns 0.
+-- Phase 8: care_gaps vs care_gap counted another way; expect 0 in both columns.
 SELECT g.measure,
        g.eligible - c.eligible AS eligible_off,
        g.closed - c.closed AS closed_off

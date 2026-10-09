@@ -1,27 +1,9 @@
--- Phase 3a — row filter, restricting which patients a reader sees at all.
---
--- A separate governed tag from phi_category on purpose. STATE is not PHI —
--- Safe Harbor permits state — so tagging it phi_category would mask it and
--- put it under the wrong policy. row_scope says what a column is for, not
--- what kind of identifier it is.
---
--- HONEST LIMIT: every patient in this dataset is in Massachusetts. This filter
--- can therefore only demonstrate all-rows versus no-rows. It shows the
--- mechanism working; it is not doing useful segregation. A second state would
--- make it real, and nothing about the code would change.
---
--- HAZARD, worse than the column masks: a row filter applies to the identity
--- the pipeline runs as. Building gold while scope_state does not match the
--- data silently produces EMPTY gold tables rather than wrong ones. No error is
--- raised. Check ops.phi_clearance before any gold build.
+-- Phase 3a row filter on STATE (row_scope tag); all patients are in MA, and a mismatch empties gold silently.
 
--- Databricks takes ADD COLUMNS (c TYPE), not ADD COLUMN c TYPE, and there is
--- no IF NOT EXISTS here — so this one statement fails on a re-run. Comment it
--- out once the column exists rather than reaching for a workaround.
+-- Fails on re-run (no IF NOT EXISTS), so left commented once the column exists.
 -- ALTER TABLE healthcare_dev.ops.phi_clearance ADD COLUMNS (scope_state STRING);
 
--- '*' means every state. A NULL here would hide every row from this user,
--- which is why the update runs before the policy is created.
+-- '*' is every state; set before the policy, since NULL hides every row.
 UPDATE healthcare_dev.ops.phi_clearance
    SET scope_state = '*'
  WHERE user_email = current_user() AND scope_state IS NULL;

@@ -1,14 +1,4 @@
-"""One place that knows how to reach the Databricks SQL warehouse.
-
-`.env` is a file, not an environment. Nothing loads it into `os.environ` on its
-own, so every script that read `os.environ["DATABRICKS_HOST"]` directly worked
-only when the surrounding shell happened to have exported the variables — which
-is not a property you want a script to depend on. `load_dotenv()` closes that
-gap, and having exactly one module call it means the next script cannot forget.
-
-Two callers today, more in later phases. The duplicated `sql.connect(...)` block
-they each carried is the reason this is a function rather than a loader helper.
-"""
+"""The one module that loads .env and connects to the Databricks SQL warehouse."""
 
 from __future__ import annotations
 
@@ -21,14 +11,8 @@ REQUIRED = ("DATABRICKS_HOST", "DATABRICKS_HTTP_PATH", "DATABRICKS_TOKEN")
 
 
 def connect():
-    """Open a warehouse connection using credentials from `.env`.
-
-    Raises with the names of anything missing rather than a bare KeyError on
-    whichever variable happened to be read first — the original failure named
-    DATABRICKS_HOST while two others were equally absent.
-    """
-    # override=False: a variable already exported in the shell wins over .env,
-    # which is what lets CI inject secrets without a file on disk.
+    """Open a warehouse connection from .env, naming every missing variable."""
+    # override=False: shell variables win, so CI can inject secrets.
     load_dotenv(override=False)
 
     missing = [name for name in REQUIRED if not os.environ.get(name)]

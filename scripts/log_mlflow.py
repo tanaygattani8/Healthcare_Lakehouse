@@ -1,14 +1,4 @@
-"""Record each detection program's marks as an MLflow run, so the comparison
-survives the laptop and this conversation.
-
-Reads ops.detection_score (built by sql/score_detection.sql) and logs one run
-per program to a Databricks experiment. Numbers only — the table holds no
-text, and nothing here reads any.
-
-Needs mlflow-skinny, kept out of requirements.txt like torch:
-    .venv/Scripts/python.exe -m pip install mlflow-skinny
-    .venv/Scripts/python.exe -m scripts.log_mlflow
-"""
+"""Log ops.detection_score per detection program as an MLflow run (needs mlflow-skinny)."""
 
 from __future__ import annotations
 
@@ -32,8 +22,7 @@ SETUP = {
 
 
 def main() -> None:
-    # MLflow prints an emoji after each run. The Windows console's default
-    # encoding cannot, and the crash lands after the run is half-recorded.
+    # MLflow prints an emoji the Windows console can't encode, mid-run.
     sys.stdout.reconfigure(encoding="utf-8")
     with dbx.connect() as conn, conn.cursor() as cur:   # also loads .env for mlflow
         cur.execute("SELECT current_user()")
@@ -54,8 +43,7 @@ def main() -> None:
             for r in (r for r in rows if r.stage == stage):
                 mlflow.log_metric(f"guesses_{r.phi_category}", r.guesses)
                 mlflow.log_metric(f"precision_{r.phi_category}", r.precision)
-                # Kinds with no real items have no recall — every guess there
-                # is a false alarm, which precision 0 already says.
+                # No real items means no recall; precision 0 already says it.
                 if r.real_items is not None:
                     mlflow.log_metric(f"recall_{r.phi_category}", r.recall)
                     mlflow.log_metric(f"covered_recall_{r.phi_category}", r.covered_recall)

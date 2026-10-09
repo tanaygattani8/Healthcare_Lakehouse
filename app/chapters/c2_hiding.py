@@ -1,6 +1,4 @@
-"""Chapter 2: de-identification. Four programs searched 25 test patients'
-notes for private details and were marked against an answer sheet built from
-each patient's own record; then who could still be picked out."""
+"""Chapter 2: de-identification scored against the answer key; who is still findable."""
 
 import altair as alt
 import streamlit as st

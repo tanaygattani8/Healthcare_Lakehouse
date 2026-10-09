@@ -1,9 +1,4 @@
-"""Every number in the app comes from SQL, and until D81 no test read it.
-Each statement in sql/, pipelines/ and setup/ must parse; where sqlglot does
-not know the Databricks DDL around a query (EXPECT constraints, policies,
-tags), the query body itself must. And every file must be UTF-8, which is how
-scripts/run_sql.py reads it: one stray cp1252 byte broke governance_check.sql
-once (D81)."""
+"""Every SQL statement parses (or its query body does), and every file is UTF-8 (D81)."""
 import logging
 import re
 from pathlib import Path

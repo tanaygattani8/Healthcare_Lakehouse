@@ -1,9 +1,5 @@
 # Databricks notebook source
-# Phase 6 batch scoring (spec §5), changed in phase 9 (spec §3.3): each
-# champion scores the index stays from 2020, or from the end of its own
-# training if that is later, into ml.readmission_scores. Rerunning replaces
-# that model version's rows. No labels here: evaluation joins back to
-# gold.readmission_signals.
+# Batch scoring: each champion scores stays after its training; reruns replace its rows.
 
 # COMMAND ----------
 

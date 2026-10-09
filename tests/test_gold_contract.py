@@ -4,11 +4,9 @@ from pathlib import Path
 from scripts import readmission_model as rm
 
 SQL = Path(__file__).resolve().parents[1] / "pipelines/medallion/gold/readmission_signals.sql"
-# The types readmission_signals uses today. A column of another type (ARRAY,
-# MAP, STRUCT, VARIANT, TIMESTAMP_NTZ) would read as undeclared: add it here.
+# Types readmission_signals uses; add any new type here.
 TYPES = r"STRING|INT|BIGINT|SMALLINT|TINYINT|DOUBLE|FLOAT|BOOLEAN|DATE|TIMESTAMP|DECIMAL"
-# What the model reads beyond FEATURES: the target, the keys (scoring and
-# patient-grouped folds), the split dates and the population flag.
+# What the model reads beyond FEATURES: target, keys, split dates, population flag.
 MODEL_READS = set(rm.FEATURES) | {rm.TARGET, "patient_id", "stay_no", "first_encounter_id",
                                   "admit_day",
                                   "discharge_day", "had_bypass_surgery"}

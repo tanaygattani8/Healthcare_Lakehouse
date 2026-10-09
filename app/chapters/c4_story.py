@@ -1,5 +1,4 @@
-"""Chapter 4: the readmission story, in five sections, from the story
-snapshots (phase 5). Any group with 1-10 stays or readmissions is hidden."""
+"""Chapter 4: the readmission story from the story snapshots; 1-10 groups hidden."""
 
 import altair as alt
 import pandas as pd
@@ -49,9 +48,7 @@ fig = iter(range(1, 50))
 
 
 def rates(signals: list[str], caption: str) -> None:
-    """Small multiples: one row per signal, each level's rate with its 95%
-    interval, on one shared axis, against the overall rate (dashed). Hidden
-    levels are named in the caption, never drawn."""
+    """One row per signal: level rates and 95% intervals on one axis; hidden levels named."""
     rows = levels[levels["signal"].isin(signals) & ~levels["suppressed"]].assign(
         name=lambda d: d["signal"].map(NAMES), overall=overall)
     hidden = levels[levels["signal"].isin(signals) & levels["suppressed"]]
@@ -60,9 +57,7 @@ def rates(signals: list[str], caption: str) -> None:
     shown = [s for s in signals if (rows["signal"] == s).any()]
     gone = "; ".join(f"{NAMES[s]}: {', '.join(g['level'])}"
                      for s, g in hidden.groupby("signal", sort=False))
-    # One chart per signal rather than a facet: a facet has a fixed width and
-    # clips on a phone; separate charts stretch. The x domain is fixed, so the
-    # rows still share one axis, drawn under the last.
+    # Separate charts, not a facet: facets have a fixed width and clip on phones.
     for s in shown:
         last = s == shown[-1]
         axis = alt.Axis(format=".0%", tickMinStep=0.01) if last else None

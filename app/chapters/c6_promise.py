@@ -1,5 +1,4 @@
-"""Chapter 6: the retraining loop (phase 9, D75; rerun in D80), replayed one
-year at a time and then run once for real. Rates and verdicts only."""
+"""Chapter 6: the retraining loop replayed a year at a time, then run once live (D75, D80)."""
 
 import altair as alt
 import pandas as pd

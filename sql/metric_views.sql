@@ -1,8 +1,4 @@
--- Phase 5 metrics layer: every number in the readmission story, defined
--- once. Built after the test questions were frozen
--- (eval/questions_test.sha256), from spec §2-§5. The metrics contestant
--- reads this file, with METRICS_NOTE in scripts/eval_text_to_sql.py, which
--- says how to query a metric view.
+-- Phase 5 metrics layer, built after the test questions were frozen; also the metrics contestant's prompt.
 
 CREATE SCHEMA IF NOT EXISTS healthcare_dev.metrics
 COMMENT "Phase 5: every number in the readmission story, defined once, as metric views.";

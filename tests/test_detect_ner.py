@@ -12,8 +12,7 @@ def test_repeats_from_overlapping_pieces_collapse():
 
 
 def test_a_token_labelled_differently_does_not_split_a_name():
-    # Two overlapping windows disagreed: one called 'B' a place. The name
-    # fragments must still join across it.
+    # Overlapping windows disagreed ('B' as a place); the name must still join.
     tokens = [(0, 1, "name"), (1, 3, "geography"), (1, 3, "name"), (3, 6, "name")]
     assert merge(tokens) == [(0, 6, "name"), (1, 3, "geography")]
 
