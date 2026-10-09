@@ -128,7 +128,10 @@ SELECT u.unknown_organization, u.unknown_provider, u.unknown_payer,
        sg.n - sg.keys                                            AS signals_duplicate_keys,
        st.nystatin_counted, st.statin_missed,
        su.surgery_from_previous_stay,
-       -- Gold must carry no governed tag: nothing in it is a direct identifier.
+       -- Gold must carry no governed tag. It is not de-identified (patient_id,
+       -- exact dates: as private as silver, D60), but a schema mask on it would
+       -- rewrite the dates every readmission window needs; it is published
+       -- only as counts (D63, D81).
        (SELECT count(*) FROM ${catalog}.information_schema.column_tags
         WHERE schema_name = 'gold')                              AS gold_tagged_columns,
        -- Every hospital encounter sits in exactly one stay (E58 broke this).

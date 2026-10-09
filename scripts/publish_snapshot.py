@@ -108,6 +108,9 @@ EVAL_SNAPSHOTS = {
 # Phase 6: the model's comparison and drift, from the ml tables the notebooks
 # write. The latest drift run only; earlier runs are history for phase 8.
 MODEL_RESULTS = "SELECT * FROM {catalog}.ml.model_results"
+MANIFEST = ("SELECT current_timestamp() AS captured_at, "
+            "to_date(from_utc_timestamp(max(started_at), 'America/Chicago')) AS data_through "
+            "FROM {catalog}.silver.encounter")
 MODEL_DRIFT = ("SELECT drift_check, period, subject, value, low, high, status "
                "FROM {catalog}.ml.drift_report "
                "WHERE run_at = (SELECT max(run_at) FROM {catalog}.ml.drift_report)")
@@ -355,6 +358,10 @@ def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
                                               columns=[d[0] for d in cur.description])
         levels = fetch_story_levels(cur, catalog)
         short = shortlist(zip(levels["signal"], levels["separates"], strict=True))
+        # Decided on the real counts (D66), but not published for a hidden
+        # level: with the hidden sum, "separates" can pin which side of the
+        # rule a hidden level falls on (D81). The verdict below counts it.
+        levels["separates"] = levels["separates"].astype("boolean").mask(levels["suppressed"])
         frames["story_levels"] = levels
         frames["story_verdict"] = pd.DataFrame({"decision": [verdict(short)],
                                                 "shortlisted": [len(short)]})
@@ -375,7 +382,85 @@ def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
             cur.execute(query, params)
             raw[name] = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
         frames.update(publish_ops(raw))
+        # When this ran, and the last day the data covers, so a page can say
+        # how old it is (D81). Two dates, no numbers.
+        cur.execute(MANIFEST.format(catalog=catalog))
+        manifest = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
+        frames["manifest"] = manifest.apply(pd.to_datetime)
     return frames
+
+
+# Every number column of every published file, and what it is (D81). A count
+# of people, stays, visits or readmissions must be 0 or 11+; every other role
+# says why its column is not one. A column with no role refuses the publish:
+# the per-frame guards above check what each frame was known to hold, and
+# this is what stops a new column, or a new frame, slipping past them.
+COUNT = "count"
+ROLES: dict[str, dict[str, str]] = {
+    # rows per table; hospitals, providers and payers count businesses (BUSINESS)
+    "bronze_counts": {"rows": COUNT},
+    # The size of each k-anonymity group, and how many people sit in groups of
+    # that size, for a copy never released. A size names no one (D81).
+    "deid_kanon": {"groups": "class size", "people": "class size"},
+    # name, date and other spans found in 25 test patients' notes: text, not people
+    "deid_scores": {"real_items": "text spans", "guesses": "text spans", "precision": "rate",
+                    "recall": "rate", "covered_recall": "rate", "exact_recall": "rate"},
+    # questions per verdict, out of 20 synthetic questions
+    "eval_scores": {"run_no": "label", "tier": "label", "answers": "questions"},
+    "gold_care_gap": {"measure_year": "label", "in_denominator": COUNT, "excl_age": COUNT,
+                      "excl_died": COUNT, "excl_hospice": COUNT, "eligible": COUNT,
+                      "met": COUNT, "gaps": COUNT},
+    "model_drift": {"value": "rate", "low": "rate", "high": "rate"},
+    "model_results": {c: "rate" for c in ("recall", "avg_precision", "brier", "cv_avg_precision",
+                                          "diff_low", "diff_mid", "diff_high",
+                                          "cut_low", "cut_mid", "cut_high")},
+    "ops_hospitals": {"stays": COUNT, "avg_length_of_stay_days": "average",
+                      "length_of_stay_vs_network_days": "average", "cost_per_stay": "money",
+                      "cost_vs_network_pct": "rate"},
+    "ops_kpi": {"visits": COUNT, "visits_prior": COUNT, "visits_change_pct": "rate",
+                "stays": COUNT, "stays_prior": COUNT, "stays_change_pct": "rate",
+                "avg_length_of_stay_days": "average",
+                "avg_length_of_stay_days_prior": "average",
+                "length_of_stay_change_days": "average", "cost_per_stay": "money",
+                "cost_per_stay_prior": "money", "cost_change_pct": "rate",
+                "readmission_rate_pct_2020_2026": "rate",
+                "readmission_rate_pct_2010_2019": "rate"},
+    "ops_payers": {"stays": COUNT, "avg_length_of_stay_days": "average",
+                   "cost_per_stay": "money"},
+    "ops_stays": {"stays": COUNT, "avg_length_of_stay_days": "average",
+                  "cost_per_stay": "money"},
+    "ops_visits": {"visits": COUNT},
+    "retrain_history": {"check_stays": COUNT, "target": "rate", "champion_rate": "rate",
+                        "champion_low": "rate", "champion_high": "rate",
+                        "cutoff_rate": "rate", "retrain_rate": "rate"},
+    "story_levels": {"chapter": "label", "index_stays": COUNT, "readmitted": COUNT,
+                     "rest_stays": COUNT, "rest_readmitted": COUNT,
+                     **{c: "rate" for c in ("rate", "low", "high",
+                                            "rest_rate", "rest_low", "rest_high")}},
+    "story_totals": {**{c: COUNT for c in ("stays", "encounters_merged", "excl_died",
+                                           "excl_short_followup", "excl_hospice",
+                                           "excl_cancer_treatment", "index_stays",
+                                           "readmitted", "patients", "readmitted_patients")},
+                     "index_stay_cost": "money", "return_stay_cost": "money"},
+    # how many signals made the shortlist: signals, not people
+    "story_verdict": {"shortlisted": "signals"},
+}
+BUSINESS = {"organizations", "providers", "payers"}
+
+
+def check_roles(frames: dict[str, pd.DataFrame]) -> None:
+    """Stop before writing anything if a number column has no declared role,
+    or a count of people, stays or visits is 1-10 (D66, D81)."""
+    for name, df in frames.items():
+        for column in df.select_dtypes(include="number").columns:
+            role = ROLES.get(name, {}).get(column)
+            if role is None:
+                raise SystemExit(f"refusing to publish: {name}.{column} has no declared role")
+            values = df[column]
+            if name == "bronze_counts":
+                values = values[~df["entity"].isin(BUSINESS)]
+            if role == COUNT and values.between(1, SUPPRESS_BELOW - 1).any():
+                raise SystemExit(f"refusing to publish: {name}.{column} holds a count of 1-10")
 
 
 def main() -> None:
@@ -384,15 +469,13 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("snapshots/bronze_counts.parquet"))
     args = parser.parse_args()
 
-    df = fetch_counts(args.catalog, ENTITIES)
     # Aggregates only. Quarantined rows are patient-shaped records; the public
     # page gets counts, never a sample.
+    frames = {args.out.stem: fetch_counts(args.catalog, ENTITIES),
+              **fetch_aggregates(args.catalog)}
+    check_roles(frames)   # every frame, before any file is written
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(args.out, index=False)
-    print(df.to_string(index=False))
-    print(f"Wrote {args.out}")
-
-    for name, frame in fetch_aggregates(args.catalog).items():
+    for name, frame in frames.items():
         path = args.out.parent / f"{name}.parquet"
         frame.to_parquet(path, index=False)
         print(frame.to_string(index=False))

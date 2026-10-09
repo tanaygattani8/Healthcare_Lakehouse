@@ -384,14 +384,19 @@ Aggregates only, never row-level: twelve rows of entity and count.
 **Invoked as:** trigger `medallion` at http://localhost:8080, or
 `docker compose --env-file ../.env exec airflow-scheduler airflow dags trigger medallion`
 from `orchestration/`. Never on a schedule (`schedule=None`).
-**Reads:** the root `.env` (via compose), `MEDALLION_PIPELINE_ID`
+**Reads:** the root `.env` (via compose), `MEDALLION_PIPELINE_ID`, `DATABRICKS_HTTP_PATH` (the gate's warehouse)
 **Writes:** nothing itself — it starts one pipeline update
 
 ```
 docker compose --env-file ../.env up -d          (orchestration/)
 └── compose builds AIRFLOW_CONN_DATABRICKS_DEFAULT from DATABRICKS_HOST/TOKEN  (D37)
     └── scheduler (LocalExecutor, D38) parses dags/medallion.py
-        └── trigger → run_medallion: DatabricksSubmitRunOperator
+        └── trigger → phi_gate (D81): POST /api/2.0/sql/statements on the
+            │   warehouse in DATABRICKS_HTTP_PATH; fails unless the run-as
+            │   user has a full '*' clearance row and governance_check's
+            │   CHECK 1 and CHECK 3 are empty
+            ▼
+            run_medallion: DatabricksSubmitRunOperator
             ├── POST /api/2.1/jobs/runs/submit
             │     tasks=[{task_key: medallion, pipeline_task: {pipeline_id}}]
             │     └── Databricks starts ONE update of medallion-dev   (cause JOB_TASK)
@@ -473,14 +478,22 @@ governance_quarantine.sql same 19 tags + same 4 policies on ops
         │                 quarantine holds whole failed rows, PHI included
         ▼
 governance_row_filter.sql row_scope tag, filter_state(), 1 ROW FILTER policy
-                          registering the tag and creating the policy in one
-                          run fails the first time (E36)
+        │                 registering the tag and creating the policy in one
+        │                 run fails the first time (E36)
+        ▼
+governance_notes.sql      br_notes._source_file tagged (phase 3b)
+        ▼
+governance_bronze.sql     19 tags on bronze.br_patients + 1 policy ON SCHEMA
+                          bronze covering all 8 values (D79)
 ```
 
 Then, independently:
 
 - `governance_check.sql` — the drift check. Run **after every pipeline full
-  refresh**. Check 1 returns nothing when correct; check 2 must read 19 and 19.
+  refresh**. Check 1 and check 3 return nothing when correct; check 2 is the
+  census (19 on each patient table, 1 on each notes or span table). Check 3
+  finds a PHI column nobody tagged (D79); the medallion DAG runs checks 1
+  and 3 before every update (D81).
 - `governance_verify.sql` — flips the clearance row and shows the masks
   opening and closing. Leaves clearance restored.
 - `governance_audit.sql` — creates `ops.phi_access_audit` over
@@ -544,8 +557,8 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
 
 ### Cycle 15 — 2026-09-27 · Phase 4 probes, steps 1-2 · reference tables and the visit fact
 
-- **Probes**: `sql/probe_phase4.sql` (P2-P5, P7) and
-  `notebooks/p6_fhir_probe.py` (P6, one bundle on
+- **Probes**: `archive/sql/probe_phase4.sql` (P2-P5, P7) and
+  `archive/notebooks/p6_fhir_probe.py` (P6, one bundle on
   `landing/fhir_probe/`). P1 was a throwaway gold view, built once and
   dropped. Results and what they changed: decision.md D57.
 - **Gold starts in the pipeline**: `pipelines/medallion/gold/dims.sql`
@@ -585,7 +598,7 @@ then `scripts.publish_snapshot`.
 
 ### Cycle 16 — 2026-09-30 to 10-03 · Phase 5 · the readmission story and text-to-SQL
 
-1. **Probes**: `sql/probe_phase5.sql` (P1 metric views, P3 `ai_query` and
+1. **Probes**: `archive/sql/probe_phase5.sql` (P1 metric views, P3 `ai_query` and
    billing) and `scripts/probe_genie.py` (P2), with a throwaway Genie space.
 2. **`gold.readmission_signals`** (and `planned_procedure`, D64/D68): listed
    in `databricks.yml`, `bundle deploy -t dev`, a `--validate-only` update
@@ -615,8 +628,8 @@ own tests; `publish_snapshot` calls it, so the app does no statistics.
 
 ### Cycle 17 — 2026-10-03/04 · Phase 6 · the readmission model
 
-1. **Probes**: `sql/probe_phase6.sql` (the `ml` schema, P3, P4) and
-   `notebooks/probe_ml.py` (P1 versions, P2 Unity Catalog registry).
+1. **Probes**: `archive/sql/probe_phase6.sql` (the `ml` schema, P3, P4) and
+   `archive/notebooks/probe_ml.py` (P1 versions, P2 Unity Catalog registry).
 2. **`gold.readmission_signals`** gains `admit_day`, `discharge_day`,
    `had_bypass_surgery`, `days_since_last_discharge`, `encounters_in_stay`,
    `arrived_via_emergency`: `bundle deploy -t dev`, `--validate-only` left to
@@ -658,7 +671,7 @@ pure Python with their own tests; the notebooks only read, call and write.
    list (and a planted wrong type), and a pipeline reading
    `information_schema`.
 2. **Before**: `sql/gold_fingerprint.sql` (12 gold tables, row count and
-   hash sum) into `data/`, and `sql/phase7_before.sql` (a copy of
+   hash sum) into `data/`, and `archive/sql/phase7_before.sql` (a copy of
    `readmission_signals` in `ops`).
 3. **How a gate stops an update**: a row gate sits in its table's `CREATE`
    (`CONSTRAINT ... EXPECT ... ON VIOLATION FAIL UPDATE`) and fails the
@@ -670,26 +683,26 @@ pure Python with their own tests; the notebooks only read, call and write.
 4. **Run**: `bundle deploy -t dev` → `--validate-only` → `refresh_selection`
    on the changed tables plus `gold_checks` (selectable by name).
 5. **After**: the fingerprint again, compared with `diff` (`key_copies` is
-   left out), and `sql/phase7_proof.sql`: `readmission_events` against
+   left out), and `archive/sql/phase7_proof.sql`: `readmission_events` against
    the PySpark copy, `readmission_signals` against its before-copy, both
    ways. Then a planted `gold_checks` failure, restored, a clean run, and
-   the copy dropped (`sql/phase7_cleanup.sql`).
+   the copy dropped (`archive/sql/phase7_cleanup.sql`).
 6. `sql/check_gold.sql` is a report; `tests/test_gold_contract.py` checks
    that every column the model reads is declared. `reconcile_gold.py` drops
    `key_copies` before comparing.
 
 ### Cycle 19 — 2026-10-05 · Phase 8 · the operations dashboard
 
-1. **Probes**: `sql/probe_phase8.sql` (where the data ends; a star join in
+1. **Probes**: `archive/sql/probe_phase8.sql` (where the data ends; a star join in
    a throwaway metric view), a parameter in a metric view's `WHERE`, the
    counter's comparison value in the UI, and the CLI's `generate` and
    `bind` commands.
 2. **Before**: the gold fingerprint and the metric-view checks into
-   `data/`, and `sql/phase8_before.sql` (a copy of `readmission_signals`).
+   `data/`, and `archive/sql/phase8_before.sql` (a copy of `readmission_signals`).
 3. **Gold**: stay cost and length of stay move into `readmission_events`,
    and `readmission_signals` reads them. Then `bundle deploy -t dev` and
    `refresh_selection` on the two tables plus `gold_checks`.
-   `sql/phase8_proof.sql` and the fingerprint show nothing else moved.
+   `archive/sql/phase8_proof.sql` and the fingerprint show nothing else moved.
 4. **Metrics**: `sql/metric_views.sql` (`operations`, `care_gaps`, `stays`
    extended), then `sql/dashboard_support.sql` (`shown`, `kpi_window`),
    then `sql/check_metrics.sql`. The dev text-to-SQL set is rerun
@@ -747,7 +760,7 @@ after checking `databricks pipelines list-updates <id>` yourself.
 
 ### Cycle 20 — 2026-10-06 · Phase 9 · retraining on drift
 
-1. **Probes**: `notebooks/probe_retrain.py` (P1 `copy_model_version`, P5
+1. **Probes**: `archive/notebooks/probe_retrain.py` (P1 `copy_model_version`, P5
    v2's flag rate by year, P6 the last admit day, P7 v2's settings); the
    provider's hook in the scheduler container (P2 pipeline updates, P3 a
    notebook's exit value: no `api/` prefix); a throwaway `probe_params` DAG

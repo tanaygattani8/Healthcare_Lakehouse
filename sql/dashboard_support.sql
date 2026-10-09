@@ -6,7 +6,11 @@
 
 -- The dashboard privacy rule (D66, D72, plan P-c): NULL when the group
 -- count n is 1-10 or unknown, otherwise value. Every number a dashboard
--- dataset returns goes through this.
+-- dataset returns goes through this, which hides each small cell in the view
+-- the viewer picked. It does not stop one filtered view giving a hidden cell
+-- back by subtraction (a hospital table beside the stays tile, say): inside
+-- the logged-in dashboard that is accepted (D74). Only the unfiltered view is
+-- public, and publish_snapshot checks it for subtraction too (D81).
 CREATE OR REPLACE FUNCTION healthcare_dev.metrics.shown(n BIGINT, value DOUBLE)
 RETURNS DOUBLE
 COMMENT "Phase 8 privacy rule: NULL when the group count n is 1-10 or unknown (D66, D72), else value."

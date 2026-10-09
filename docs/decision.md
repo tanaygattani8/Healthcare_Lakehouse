@@ -804,7 +804,7 @@ bootstrap has not run.
 
 ### D41 — the governance probe: all five mechanisms work on Free Edition
 
-Three things in D40 were assumed. `sql/probe_governance.sql` tested them before
+Three things in D40 were assumed. `archive/sql/probe_governance.sql` tested them before
 any of 3a was built. **All five passed**, and two of them were expected to fail.
 
 | Probe | Result |
@@ -838,7 +838,7 @@ and an audit view believed impossible.
 
 ### D42 — ABAC exists here, and it may remove D40's central constraint
 
-`sql/probe_tag_mask_link.sql` answered three more questions.
+`archive/sql/probe_tag_mask_link.sql` answered three more questions.
 
 **P7 — an applied mask is visible as metadata.**
 `information_schema.column_masks` returns
@@ -874,7 +874,7 @@ tag rather than by name. The next probe creates one. D40 stands until it does.
 
 ### D43 — masks are ABAC policies on the schema, not MASK clauses on columns
 
-**This replaces D40's approach.** `sql/probe_abac.sql` created a working
+**This replaces D40's approach.** `archive/sql/probe_abac.sql` created a working
 tag-driven column mask on Free Edition.
 
 **The first attempt failed**, and the error is the useful part:
@@ -1124,7 +1124,7 @@ than an incident.
 
 ### D48 — phase 3b's probes: the platform is there, the offsets are not
 
-`sql/probe_3b.sql`, run before any of 3b was planned in detail.
+`archive/sql/probe_3b.sql`, run before any of 3b was planned in detail.
 
 | Probe | Result |
 |---|---|
@@ -2721,7 +2721,7 @@ One live run then applies it for real.
   the ranking guard. A test pins every draw to the old loop, so D71's
   intervals stand.
 
-**Probes** (`notebooks/probe_retrain.py`, the provider's hook in the
+**Probes** (`archive/notebooks/probe_retrain.py`, the provider's hook in the
 container, and a throwaway DAG):
 - **P1:** `copy_model_version` works on Free Edition. The copy keeps the
   source's run id and tags, and scores identically.
@@ -2926,8 +2926,10 @@ so a reader saw only a README screenshot. Showing it is what a pitch needs.
   with no filter), the network-gap table (all zeros with no filter), the
   care-gap table (chapter 3 has it), and the filters. Filtering a public
   page means publishing every combination and proving no two of them give a
-  hidden count back; the live dashboard is safe because each query is
-  suppressed on the group the viewer picked.
+  hidden count back. The live dashboard hides each small cell in the view
+  the viewer picked, and a filtered view can still give one back by
+  subtraction; that is accepted only because it sits behind the workspace
+  login (D74; corrected in D81, which first said "safe").
 - **Visits by type are one small chart per type,** sharing the month axis,
   each on its own scale. The dashboard stacks seven types in seven colours;
   the app has two validated chart colours.
@@ -3115,7 +3117,7 @@ not a task in the medallion DAG.
   is the rule with a random share of its alerts dropped: its expected
   recall is its own times the share kept (`thinned_rule_recall`).
 
-**The probe** (`notebooks/probe_window.py`, read-only: nothing logged or
+**The probe** (`archive/notebooks/probe_window.py`, read-only: nothing logged or
 registered). Every window, "all" population; production 2,451 stays, 34
 readmissions; model minus rule in points of recall, 95% interval:
 
@@ -3183,3 +3185,95 @@ fires again.
 **Not done.** The reviewer's remaining findings stay as D79 lists them. The
 thinned rule is a weak baseline on purpose (the same rule, fewer alerts);
 a rule that ranks its own alerts, by age say, would be a stronger one.
+
+### D81 — the audit's smaller findings, all of them
+
+**Why.** D79 and D80 fixed the findings a reader could check in a minute.
+These are the rest, each answered with a change or, where nothing would
+help, a reason.
+
+**Guards.**
+- **One deny-by-default snapshot guard** (`check_roles`). Every number
+  column of every published file has a declared role: a count of people,
+  stays, visits or readmissions must be 0 or 11+, and any other role says
+  why its column is not one (rate, money, average, label, text spans,
+  questions, signals, class size). An undeclared column, or a new frame,
+  refuses the publish; all frames are checked before any file is written.
+  Hospitals, providers and payers count businesses, so `payers = 10` passes.
+  **The written exception:** chapter 2's k-anonymity table publishes group
+  sizes (a group of 4, 8 people in such groups) for a copy never released.
+  A size names no one; the colophon now says so.
+- **`separates` is not published for a hidden level.** With the hidden sum,
+  it could say which side of the rule a hidden level falls on; on today's
+  data it pinned nothing (the reviewer's arithmetic), but the rule allowed
+  it. The verdict still counts it: GO with 9 signals, unchanged.
+- **The medallion DAG's first task is a PHI gate** (`phi_gate`). Through the
+  SQL warehouse's statement API it reads the run-as user's clearance row
+  and governance_check.sql's CHECK 1 and CHECK 3; any of them wrong and the
+  pipeline never starts. D47 asked for this check before every gold build;
+  until now it was a sentence. The call was made by hand, exactly as the
+  DAG makes it: 1/0/0 today, and `cleared = 0` with an impossible scope.
+  `tests/test_dag_gate.py` keeps the DAG's copy of CHECK 3 in step.
+- **Silver's keys are unique** (`silver_checks`, `FAIL UPDATE`): duplicate
+  `patient_id` or `encounter_id`. Every gold total is checked against
+  silver, so a visit landed twice doubled in both and passed. Planted once
+  in a query: 1. `code_not_in_dim_code` stays near-tautological: an
+  independent vocabulary (SNOMED, RxNorm, LOINC) is licensed and online,
+  and the platform reaches neither. Recorded, not fixed.
+- **Stays are keyed on their first encounter.** `stay_no` counts a
+  patient's stays in order, so a late earlier visit renumbers every later
+  one. `readmission_signals` carries `first_encounter_id` (declared in the
+  contract, never a feature), its one-row gate partitions on it, and
+  `ml.readmission_scores` stores it (NULL for versions scored before).
+  10,724 stays, 10,724 keys.
+
+**CI.**
+- `databricks/setup-cli` pinned by commit (v1.20.0, the release #6 passed
+  with), not `@main`, in the job that holds the token.
+- `tests/test_sql_parses.py`: every statement in sql/, pipelines/ and
+  setup/ parses with sqlglot, or, where sqlglot does not model the
+  Databricks DDL around it (EXPECT constraints, policies, tags), its query
+  body does. It also reads every file as UTF-8, which found E70.
+
+**Data.**
+- `deid.patient` loses income and healthcare spend (D56: near-unique per
+  person). Dropped by `ALTER TABLE ... DROP COLUMNS`, not a rebuild: a
+  rebuild recomputes ages from today, and bands would move. A checksum of
+  the remaining columns matched before and after. Older Delta versions
+  keep them until retention lapses.
+- **Chicago days in `care_gap` and `patient_360`**, as in
+  `readmission_events`. Measured first: the data end and measure year
+  agree either way, but 54 rows sat across the 2025 year edge (13 HbA1c,
+  38 blood pressure, 3 statin). After the change every care-gap count is
+  identical: no patient's result moved. The PySpark twin changed with
+  `patient_360`; SQL and PySpark reconcile at 0 and 0.
+- **The readmission gate, rerun on the final label:** all stays, 1.31%,
+  PROCEED; without bypass, 0.62%, PIVOT. That population was registered
+  and scored anyway; it is now labelled experimental in chapter 5 and on
+  the registered model, and was never retrained.
+
+**Words.**
+- Text-to-SQL: exact McNemar on the same 20 questions. Genie against the
+  metric views p = 0.125 and 0.5, against raw 0.07 and 0.29, metric views
+  against raw 0.73 in both runs. The README and chapter 4 call it not
+  separable, not a ranking.
+- Four comments matched to the code: `shown()` (each view, not across
+  views), D74's "safe" line here, gold_checks' "no direct identifier"
+  (gold is as private as silver, D60), and deid.note's "1.000" (the answer
+  sheet's own spans have no score).
+- A snapshot manifest (`manifest.parquet`: when published, data through)
+  dates every page in the colophon. A test checks the home page's chapter 4
+  and 5 lines against the snapshots they summarise.
+
+**Tidying.**
+- The map keeps 640px on a phone, scrolling in its own box, so its labels
+  read at about 9-10px rather than 5. The reviewer suggested hiding them;
+  the map is the home page's way in, so it stays.
+- 15 probe and phase files moved to `archive/` with a README; sql/ and
+  notebooks/ now hold only what runs. Paths in the docs follow them.
+- Already done, so not changed: batch 2's exact command is in
+  `synthea/README.md` (the reviewer could not read it).
+
+**Kept as it was.** The `champion` alias: it is MLflow's convention, the
+rule is not a registered model, and chapter 5 says which comparison the
+model wins.

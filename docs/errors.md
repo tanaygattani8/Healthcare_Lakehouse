@@ -92,6 +92,7 @@ meaning was destroyed. Those are the ones worth rereading.
 | [E67](#e67) | `Cannot read properties of undefined (reading 'forEach')` in `parseAxesAndHeaders` | app |
 | [E68](#e68) | `DagBag.__init__() got an unexpected keyword argument 'include_examples'` | 10 |
 | [E69](#e69) | `DELTA_INSERT_COLUMN_ARITY_MISMATCH` restoring the clearance row: the user is left uncleared | audit |
+| [E70](#e70) | `UnicodeDecodeError: 'utf-8' codec can't decode byte 0x97` running `governance_check.sql` | audit |
 
 ---
 
@@ -1658,7 +1659,7 @@ fix (no model, scoring or snapshot run).
   fails before the table is replaced, whatever the cause.
 - `key_copies` is not a feature (`FEATURES` is an allowlist).
   `reconcile_gold.py` drops it before comparing; `sql/gold_fingerprint.sql`
-  and `sql/phase7_proof.sql` leave it out.
+  and `archive/sql/phase7_proof.sql` leave it out.
 
 ### E60 — the text-to-SQL contestant wrapped its answers in the dashboard's privacy function {#e60}
 ```
@@ -1875,4 +1876,21 @@ or left it empty (D47). Nothing ran.
 `(user_email, level, scope_state) VALUES (current_user(), 'full', '*')`,
 in the probe and in `governance_verify.sql`. The file had carried the
 same bug since the row filter landed; it had not been re-run since.
+
+### E70 — governance_check.sql stops being UTF-8 {#e70}
+```
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0x97 in position 2340: invalid start byte
+```
+
+**Cause.** D79's CHECK 3 was added by a Python script that read and wrote the
+file with `read_text()` and `write_text()` and no encoding. On Windows that is
+cp1252: the file's existing UTF-8 dashes survived the round trip byte for
+byte, but the one new em dash was written as cp1252's `0x97`. Python opened it
+without complaint in the same default, so the check ran in D79; but
+`scripts/run_sql.py` reads UTF-8 and would have refused the file. It reached
+`main` in #6 and was found writing D81's SQL parse test.
+
+**Fix.** The one byte replaced with the UTF-8 dash. `tests/test_sql_parses.py`
+now reads every SQL file as UTF-8, so a file that is not fails CI. Every edit
+script since passes `encoding="utf-8"`.
 

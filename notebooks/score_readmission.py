@@ -40,7 +40,7 @@ client = mlflow.MlflowClient()
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {TABLE} (
   patient_id STRING, stay_no BIGINT, model_name STRING, model_version STRING,
-  score DOUBLE, flagged BOOLEAN, scored_at TIMESTAMP)
+  score DOUBLE, flagged BOOLEAN, scored_at TIMESTAMP, first_encounter_id STRING)
 COMMENT 'Phase 6: champion scores for 2020-2026 index stays. Labels stay in gold.'""")
 
 signals = spark.table(f"{C}.gold.readmission_signals").toPandas()
@@ -60,10 +60,13 @@ for population in rm.POPULATIONS:
     out = pd.DataFrame({
         "patient_id": prod["patient_id"].astype(str).to_numpy(),
         "stay_no": prod["stay_no"].astype("int64").to_numpy(),
+        # The key to join on: stay_no is a position and can renumber (D81).
+        "first_encounter_id": prod["first_encounter_id"].astype(str).to_numpy(),
         "model_name": name, "model_version": str(champion.version), "score": score,
         "flagged": score >= float(champion.tags["alert_threshold"]),
         "scored_at": dt.datetime.now(dt.UTC)})
-    (spark.createDataFrame(out).write.mode("overwrite")
+    # mergeSchema: first_encounter_id joined the table in D81; older rows hold NULL.
+    (spark.createDataFrame(out).write.mode("overwrite").option("mergeSchema", "true")
           .option("replaceWhere",
                   f"model_name = '{name}' AND model_version = '{champion.version}'")
           .saveAsTable(TABLE))

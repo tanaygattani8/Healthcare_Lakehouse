@@ -91,7 +91,11 @@ with side:
              "First published judged at the rule's count only, as \"no better\". An audit "
              "pointed out no deployment runs there; and training reached back to 1915, so "
              "drift was there on day one. Training now starts in 2000. <i>D80</i>",
-             f"The live champion is {champion}. <i>D75, D80</i>")
+             f"The live champion is {champion}. <i>D75, D80</i>",
+             "Without bypass surgery is an experiment, not a product: 61 readmissions in "
+             "9,891 stays is 0.62%, under the 1% line phase 1's gate set before any model "
+             "(the gate says pivot there; on every stay, 1.31%, it says proceed). It is "
+             "scored but never retrained. <i>D81</i>")
 
 ui.heading("Drift", "Has the data moved since training?")
 main, side = ui.section()
@@ -137,7 +141,7 @@ with main:
               "that is drift, not an error. Chapter 6 picks this up.")
 with side:
     ui.notes("A true/false feature is judged by its rate, not PSI: PSI barely moves on two "
-             "values. Heart disease went from about 22% to 35% of stays at a PSI of 0.09.",
+             "values. Heart disease went from 24.9% to 35.4% of stays at a PSI of 0.05.",
              "2020-2026 patients are older and carry more chronic disease, and COVID-19 arrives "
              "as an admit reason training never saw.")
 

@@ -51,6 +51,10 @@
                 padding-top: .8rem; margin-top: 2.5rem; }
 .lh-colophon a { color: var(--accent); }
 .lh-map a { text-decoration: none; }
+/* On a phone the 800-wide map would draw its 11px labels at about 5px. It
+   keeps 640px and scrolls sideways in its own box instead; the page does not. */
+.lh-mapwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (max-width: 600px) { .lh-map { min-width: 640px; } }
 .lh-map a:hover text.st, .lh-map a:focus-visible text.st { fill: var(--accent); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 /* The chapter list: three columns, then two, then one. */

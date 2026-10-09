@@ -38,6 +38,8 @@ resources:
         - file:
             path: pipelines/medallion/silver/note_chunk.sql
         - file:
+            path: pipelines/medallion/silver/silver_checks.sql
+        - file:
             path: pipelines/medallion/gold/dims.sql
         - file:
             path: pipelines/medallion/gold/fact_encounter.sql
