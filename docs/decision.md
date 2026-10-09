@@ -1563,7 +1563,7 @@ encounter, with every exclusion as its own column. Proven in four checks:
 - **B.** The gate's rules rewritten on silver: **identical**, all five
   numbers. No hospital encounter is in quarantine. So the DuckDB-to-Spark
   translation changed nothing, and every later difference is a rule.
-- **C.** Each change switched on one at a time (`sql/readmission_ladder.sql`):
+- **C.** Each change switched on one at a time (`archive/sql/readmission_ladder.sql`):
 
 | Step | Index stays | Readmitted | Rate |
 |---|---:|---:|---:|
@@ -1769,7 +1769,7 @@ also leave cancer-treatment stays out of the index stays.
 - The same stay is **not an index stay**, through a new exclusion column,
   `excl_cancer_treatment`. Every exclusion stays visible.
 
-**The ladder** (`sql/readmission_ladder.sql`) gains two steps, each switched
+**The ladder** (`archive/sql/readmission_ladder.sql`) gains two steps, each switched
 on alone:
 
 | Step | Index stays | Readmitted | Rate |
@@ -3292,3 +3292,50 @@ comments and docstrings (Python AST, SQL with comments stripped, parsed
 YAML/TOML): no code changed. `sql/deid.sql` it could not judge (an
 apostrophe in its Python UDF), so its diff was read by hand. 113 files,
 about 1,150 lines shorter; ruff clean, 321 tests pass.
+
+### D83 — two independent code reviews, matched
+
+**Why.** Two subagents reviewed `main` (6e558a1) independently: one with the
+ponytail method (over-engineering only: delete, stdlib, native, yagni,
+shrink), one with Alibaba's Open Code Review in delegation mode (OCR picks
+the files and the rules, the agent reviews; no model key). Only one finding
+overlapped: chapter 6's "vnan". Every finding was checked against the code
+before anything changed.
+
+**Fixed.**
+- k-anonymity counted fewer columns than `deid.patient` publishes (E72).
+- A fresh workspace's clearance table lacked `scope_state` (E71).
+- Chapter 6 guards a live run that promotes nothing.
+- Local Airflow: the UI listens on 127.0.0.1 only, and the admin password
+  and JWT secret must come from `.env` (no defaults) — its containers hold
+  the Databricks token. Apache's boilerplate went with it (270 → 141 lines).
+- The drift notebook reads each champion's own windows (E73). Rerun, chapter
+  5's Fig 5.3 now shows the live champions: v9 for every stay, whose cutoff
+  chapter 6 reset on 2025, sits on the budget for 2024-2026 and under it
+  before; the caption says so. Features and no_bypass are unchanged.
+- Visit date keys are Chicago days (E74): 473,002 of 2,074,520 visits moved
+  off their UTC day; every key is still in `dim_date`, and every gate passed.
+- Runtime `assert`s became raised errors (`python -O` strips asserts).
+- CI: a read-only token, job timeouts, a pip cache.
+- Tests: the metric views' YAML and every `expr` now parse in CI; chapter 4's
+  hand-typed rates and counts are checked against the story snapshots.
+
+**Cut (ponytail).** Archived: `scripts/log_mlflow.py`, `scripts/probe_genie.py`,
+`sql/readmission_ladder.sql`, `sql/ml_fingerprint.sql` (each done once). One
+`_frame()` helper for six copies in `publish_snapshot`, `--out-dir` instead of
+an `--out` whose stem had to be `bronze_counts`, one `rm.TRUSTED_TYPES` and
+`rm.kinds()` instead of copies, `Counter` instead of hand counting, `split()`
+without a parameter nobody passed, and two dead bits of the app.
+
+**Kept, against the review.**
+- Phase 1's `calibrate.py` and `readmission_gate.py` (and duckdb): the gate is
+  the project's first decision, tested, and costs nothing to keep.
+- Track B and the FHIR notebook: rerun instead, since the README's
+  "0 differences" dated from batch 1. Track B on both batches: 0 of 14,313
+  stays and 0 of 12,580 patients differ, both directions. FHIR: 0 of 4,362
+  visits and 0 of 2,426 conditions, as before.
+- `databricks.yml`'s explicit file list and `run_notebook.sh`'s poll loop:
+  neither change can be proven without a live run, for a few lines.
+- Two copies of the leak prefixes (model and story): each guard stands alone.
+- The shared note-file helper: it would tie the standalone NER script to the
+  Databricks connector to save two lines.

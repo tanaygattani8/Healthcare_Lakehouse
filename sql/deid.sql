@@ -54,7 +54,7 @@ return note
 $$;
 
 CREATE OR REPLACE TABLE healthcare_dev.deid.patient
-COMMENT "De-identified patients. 5-year birth and death bands, blank where fewer than 5 people share band + gender + death band, and for 90+. No ZIP, names, identifiers, income or spend. Join on deid_id."
+COMMENT "De-identified patients. 5-year birth and death bands; where fewer than 5 people share band + gender + death band, or for 90+, the bands and is_deceased are blank and years_suppressed is true. No ZIP, names, identifiers, income or spend. Join on deid_id."
 AS
 WITH aged AS (
     SELECT p.*, k.deid_id,
@@ -68,17 +68,17 @@ banded AS (
            CASE WHEN age <= 89 THEN cast(floor(year(death_date) / 5) * 5 AS INT) END AS death_band
     FROM aged
 ),
--- Bands blanked when fewer than 5 people share them (D56).
+-- Hidden when fewer than 5 share the bands, or 90+: every birth/death detail goes (D56, E72).
 counted AS (
-    SELECT *, count(*) OVER (PARTITION BY birth_band, GENDER, death_band) AS k
+    SELECT *, count(*) OVER (PARTITION BY birth_band, GENDER, death_band) < 5 OR age > 89 AS hidden
     FROM banded
 )
 SELECT deid_id,
-       CASE WHEN k >= 5 THEN birth_band END AS birth_year_from,
-       CASE WHEN k >= 5 THEN death_band END AS death_year_from,
-       CASE WHEN age > 89 THEN '90+' END    AS age_band,
-       k < 5 AS years_suppressed,
-       is_deceased, GENDER AS gender, RACE AS race, ETHNICITY AS ethnicity,
+       CASE WHEN NOT hidden THEN birth_band END  AS birth_year_from,
+       CASE WHEN NOT hidden THEN death_band END  AS death_year_from,
+       hidden                                    AS years_suppressed,
+       CASE WHEN NOT hidden THEN is_deceased END AS is_deceased,
+       GENDER AS gender, RACE AS race, ETHNICITY AS ethnicity,
        MARITAL AS marital, STATE AS state
 -- No income or spend: near-unique per person (D56, D81).
 FROM counted;

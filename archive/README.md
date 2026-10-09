@@ -8,6 +8,10 @@ One-off files, kept as the record their decisions cite; nothing re-runs them.
   (`docs/decision.md`).
 - `sql/phase7_*.sql`, `sql/phase8_*.sql`: before and after fingerprints and
   the cleanup of a phase's throwaway objects.
+- `sql/readmission_ladder.sql` (phase 4's rate change, step by step),
+  `sql/ml_fingerprint.sql` (phase 9's before-record), `scripts/log_mlflow.py`
+  (phase 3b's one MLflow log) and `scripts/probe_genie.py` (phase 5's probe P2):
+  done once, archived after the code review (D83).
 
 Moved here from `sql/` and `notebooks/` after the audit (D81), so the two
 folders hold only what the pipeline, governance and model actually run.

@@ -1422,7 +1422,7 @@ run ends. The Windows console's default encoding (cp1252) has no emoji, so
 the print raised after the run had been created and before it was marked
 finished. The first run was left `RUNNING` in the experiment.
 
-**Fix.** `scripts/log_mlflow.py` switches stdout to UTF-8 before logging. The
+**Fix.** `archive/scripts/log_mlflow.py` switches stdout to UTF-8 before logging. The
 half-finished run was deleted before the four runs were logged again.
 
 **Lesson.** A library's decoration can fail after its real work, leaving
@@ -1894,3 +1894,59 @@ without complaint in the same default, so the check ran in D79; but
 now reads every SQL file as UTF-8, so a file that is not fails CI. Every edit
 script since passes `encoding="utf-8"`.
 
+
+### E71 — a fresh workspace cannot set clearance scope {#e71}
+```
+[UNRESOLVED_COLUMN] A column with name `scope_state` cannot be resolved.
+```
+(Not hit: found by the ponytail review reading the files in order.)
+
+**Cause.** `sql/governance_bootstrap.sql` created `ops.phi_clearance` with two
+columns. The row filter added `scope_state` by an `ALTER TABLE ... ADD
+COLUMNS` that was then commented out, because it fails on a re-run. The live
+table has the column; a fresh workspace would not, so the row filter's
+UPDATE, `governance_verify.sql`'s insert and E69's restore would all fail.
+
+**Fix.** The bootstrap creates all three columns; the commented ALTER is gone.
+
+### E72 — "k ≥ 5 released" counted fewer columns than the table publishes {#e72}
+(Not an error message: found by the Open Code Review pass, then measured.)
+
+**Cause.** `sql/kanon.sql` grouped `deid.patient` on birth band, gender and
+death band. The table also published `age_band` ('90+'), `is_deceased` and
+`years_suppressed`, all from the same birth and death dates, and they split
+the suppressed group D56 relied on. Grouped on every published birth/death
+column, 7 people sat in 3 groups below 5, the smallest of 1. The snapshot and
+chapter 2 said nobody was below 5.
+
+**Fix.** A suppressed person (fewer than 5 share their bands, or 90+) now
+publishes no birth or death detail at all: no bands, no `is_deceased`, and
+`age_band` is gone. `kanon.sql` groups on every published birth, death and
+gender column, and `tests/test_kanon_covers_deid.py` fails if `deid.patient`
+gains one that kanon does not group on. Re-measured: 0 people below 5, the
+two suppressed groups hold 76 and 87. The published spread is unchanged,
+because the suppressed people were already one group per gender in the old
+count; now that is true of the table too.
+
+### E73 — the drift notebook judged every champion by phase 6's windows {#e73}
+(Not hit: found by the Open Code Review pass.)
+
+**Cause.** `notebooks/drift_readmission.py` took training and production from
+`rm.split()` and compared the flag rate to training's share at the
+champion's current cutoff. Phase 9 promotes champions with new cutoffs or new
+training windows; scoring already reads them from the version's tags. A rerun
+with v9 would have judged it against the wrong reference rate, and a
+retrained champion's own training stays would have counted as production.
+
+**Fix.** The notebook takes both windows from the champion's tags
+(`rt.training_window`, `rt.scored_from`), and the flag-rate reference is the
+budget every cutoff is set to (`rt.budget`, per population).
+
+### E74 — visit date keys were UTC days {#e74}
+(Not hit: found by the Open Code Review pass.)
+
+**Cause.** `gold.fact_encounter`'s date keys and `gold.dim_date`'s bounds
+used UTC days; the rest of gold uses Chicago days (D35, D81). An evening
+visit on 31 December keyed into the next year.
+
+**Fix.** Both use `from_utc_timestamp(..., 'America/Chicago')`.

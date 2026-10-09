@@ -27,7 +27,7 @@ TARGET = "outcome_readmitted_30d"
 NUMBERS = ["age_at_admit", "conditions_at_admit", "length_of_stay_days", "prior_stays_12m",
            "prior_emergency_12m", "encounters_in_stay", "days_since_last_discharge"]
 FLAGS = ["has_diabetes", "has_hypertension", "has_cardiovascular_disease", "is_planned",
-         "arrived_via_emergency",  # P3: delete this line if the probe dropped the feature
+         "arrived_via_emergency",
          "had_bypass_surgery"]
 CATEGORIES = ["gender", "admit_reason"]
 FEATURES = NUMBERS + FLAGS + CATEGORIES
@@ -35,6 +35,9 @@ FEATURES = NUMBERS + FLAGS + CATEGORIES
 NEVER = {"patient_id", "stay_no", "first_encounter_id", "admit_year", "admit_day",
          "discharge_day", "stay_claim_cost"}
 LEAK_PREFIXES = ("post_", "outcome_")
+# skops loads only trusted types (E56).
+TRUSTED_TYPES = ["numpy.dtype", "sklearn.compose._column_transformer._RemainderColsList",
+                 "sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor"]
 GRID = {
     "logistic": [{"C": c} for c in (0.01, 0.1, 1)],
     "boosting": [{"max_depth": d, "learning_rate": r} for d in (2, 3) for r in (0.05, 0.1)],
@@ -51,16 +54,19 @@ def population(df: pd.DataFrame, name: str) -> pd.DataFrame:
     return df if name == "all" else df[~df["had_bypass_surgery"].astype(bool)]
 
 
-def split(df: pd.DataFrame, train_until: str = TRAIN_UNTIL, prod_from: str = PROD_FROM,
-          train_from: str | None = TRAIN_FROM) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def split(df: pd.DataFrame, prod_from: str = PROD_FROM,
+          train_from: str = TRAIN_FROM) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Training, gap, production; the gap's labels look past the cutoff, so it is unused (D80)."""
     admit = pd.to_datetime(df["admit_day"])
     discharge = pd.to_datetime(df["discharge_day"])
-    before = admit < pd.Timestamp(prod_from)
-    if train_from is not None:
-        before &= admit >= pd.Timestamp(train_from)
-    train = before & (discharge <= pd.Timestamp(train_until))
+    before = (admit < pd.Timestamp(prod_from)) & (admit >= pd.Timestamp(train_from))
+    train = before & (discharge <= pd.Timestamp(TRAIN_UNTIL))
     return df[train], df[before & ~train], df[admit >= pd.Timestamp(prod_from)]
+
+
+def kinds(columns) -> dict[str, str]:
+    """Each feature's drift kind: number, flag or category."""
+    return {c: "number" if c in NUMBERS else "flag" if c in FLAGS else "category" for c in columns}
 
 
 def features_for(name: str) -> list[str]:

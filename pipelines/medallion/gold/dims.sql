@@ -1,12 +1,13 @@
 -- Reference tables, from bronze: silver never modelled them.
 
 CREATE OR REFRESH MATERIALIZED VIEW ${catalog}.gold.dim_date
-COMMENT "One row per calendar day the encounters span. date_key is yyyymmdd."
+COMMENT "One row per Chicago calendar day the encounters span. date_key is yyyymmdd."
 TBLPROPERTIES ("quality" = "gold")
 AS
 WITH bounds AS (
-    SELECT to_date(min(started_at)) AS first_day,
-           to_date(max(coalesce(stopped_at, started_at))) AS last_day
+    SELECT to_date(from_utc_timestamp(min(started_at), 'America/Chicago')) AS first_day,
+           to_date(from_utc_timestamp(max(coalesce(stopped_at, started_at)), 'America/Chicago'))
+               AS last_day
     FROM ${catalog}.silver.encounter
 )
 SELECT cast(date_format(d, 'yyyyMMdd') AS INT) AS date_key,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import re
+from collections import Counter
 from pathlib import Path
 
 from scripts import dbx
@@ -37,7 +38,7 @@ def main() -> None:
         heldout = {row[0] for row in cur.fetchall()}
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    counts: dict[str, int] = {}
+    counts: Counter[str] = Counter()
     with OUT.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(["stage", "patient_id", "char_start", "char_end",
@@ -49,10 +50,10 @@ def main() -> None:
             note = path.read_text(encoding="utf-8", errors="replace")
             for start, end, category, text in detect(note):
                 writer.writerow(["regex", patient_id, start, end, category, text])
-                counts[category] = counts.get(category, 0) + 1
+                counts[category] += 1
 
     print(f"{len(heldout)} test-set patients, written to {OUT}")
-    for category, count in sorted(counts.items(), key=lambda x: -x[1]):
+    for category, count in counts.most_common():
         print(f"  {category:<8} {count:>6}")
 
 

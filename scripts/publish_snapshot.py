@@ -190,7 +190,8 @@ def fetch_story_levels(cur, catalog: str) -> pd.DataFrame:
                     f"FROM {view} GROUP BY ALL")
         for level, stays, readmitted, patients in cur.fetchall():
             # A NULL level would make "<> :level" match nothing.
-            assert level is not None, f"{signal} has a NULL level"
+            if level is None:
+                raise SystemExit(f"refusing to publish: {signal} has a NULL level")
             cur.execute(f"SELECT {STORY_MEASURES} FROM {view} "
                         f"WHERE cast({signal} AS STRING) <> :level", {"level": level})
             rest = Side(*cur.fetchone())
@@ -317,17 +318,18 @@ def publish_ops(raw: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
     return out
 
 
+def _frame(cur, query: str, params: dict | None = None) -> pd.DataFrame:
+    cur.execute(query, params) if params else cur.execute(query)
+    return pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
+
+
 def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
     frames = {}
     with dbx.connect() as conn, conn.cursor() as cur:
         for name, query in {**DEID_SNAPSHOTS, **GOLD_SNAPSHOTS, **EVAL_SNAPSHOTS}.items():
-            cur.execute(query.format(catalog=catalog))
-            df = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
-            check_only_categories(df)
-            frames[name] = df
-        cur.execute(STORY_TOTALS.format(catalog=catalog))
-        frames["story_totals"] = pd.DataFrame(cur.fetchall(),
-                                              columns=[d[0] for d in cur.description])
+            frames[name] = _frame(cur, query.format(catalog=catalog))
+            check_only_categories(frames[name])
+        frames["story_totals"] = _frame(cur, STORY_TOTALS.format(catalog=catalog))
         levels = fetch_story_levels(cur, catalog)
         short = shortlist(zip(levels["signal"], levels["separates"], strict=True))
         # Masked on hidden levels: with the hidden sum it pins their side (D81).
@@ -339,23 +341,16 @@ def fetch_aggregates(catalog: str) -> dict[str, pd.DataFrame]:
             check_only_categories(frames[name])
         for name, query, publish in (("model_results", MODEL_RESULTS, publish_model_results),
                                      ("model_drift", MODEL_DRIFT, publish_drift)):
-            cur.execute(query.format(catalog=catalog))
-            frames[name] = publish(pd.DataFrame(cur.fetchall(),
-                                                columns=[d[0] for d in cur.description]))
+            frames[name] = publish(_frame(cur, query.format(catalog=catalog)))
             check_only_categories(frames[name])
-        cur.execute(RETRAIN_HISTORY.format(catalog=catalog))
         frames["retrain_history"] = publish_retrain_history(
-            pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description]))
-        raw = {}
-        for name, (query, params) in [*ops_queries(catalog).items(),
-                                      ("kpi_window", (OPS_WINDOW.format(catalog=catalog), {}))]:
-            cur.execute(query, params)
-            raw[name] = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
+            _frame(cur, RETRAIN_HISTORY.format(catalog=catalog)))
+        raw = {name: _frame(cur, query, params) for name, (query, params)
+               in [*ops_queries(catalog).items(),
+                   ("kpi_window", (OPS_WINDOW.format(catalog=catalog), {}))]}
         frames.update(publish_ops(raw))
         # Run time and data-through date, so pages can say how old they are (D81).
-        cur.execute(MANIFEST.format(catalog=catalog))
-        manifest = pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
-        frames["manifest"] = manifest.apply(pd.to_datetime)
+        frames["manifest"] = _frame(cur, MANIFEST.format(catalog=catalog)).apply(pd.to_datetime)
     return frames
 
 
@@ -429,16 +424,16 @@ def check_roles(frames: dict[str, pd.DataFrame]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", default="healthcare_dev")
-    parser.add_argument("--out", type=Path, default=Path("snapshots/bronze_counts.parquet"))
+    parser.add_argument("--out-dir", type=Path, default=Path("snapshots"))
     args = parser.parse_args()
 
     # Aggregates only: quarantine gets counts, never a sample.
-    frames = {args.out.stem: fetch_counts(args.catalog, ENTITIES),
+    frames = {"bronze_counts": fetch_counts(args.catalog, ENTITIES),
               **fetch_aggregates(args.catalog)}
     check_roles(frames)   # every frame, before any file is written
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in frames.items():
-        path = args.out.parent / f"{name}.parquet"
+        path = args.out_dir / f"{name}.parquet"
         frame.to_parquet(path, index=False)
         print(frame.to_string(index=False))
         print(f"Wrote {path}")

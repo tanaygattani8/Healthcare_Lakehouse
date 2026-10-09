@@ -11,8 +11,11 @@ TBLPROPERTIES ("quality" = "gold")
 AS
 SELECT e.encounter_id,
        e.patient_id,
-       cast(date_format(e.started_at, 'yyyyMMdd') AS INT)  AS start_date_key,
-       cast(date_format(e.stopped_at, 'yyyyMMdd') AS INT)  AS stop_date_key,
+       -- Chicago days, as everywhere else in gold (D81, E74).
+       cast(date_format(from_utc_timestamp(e.started_at, 'America/Chicago'), 'yyyyMMdd') AS INT)
+                                                           AS start_date_key,
+       cast(date_format(from_utc_timestamp(e.stopped_at, 'America/Chicago'), 'yyyyMMdd') AS INT)
+                                                           AS stop_date_key,
        e.started_at,
        e.stopped_at,
        round((unix_timestamp(e.stopped_at) - unix_timestamp(e.started_at)) / 3600.0, 2)

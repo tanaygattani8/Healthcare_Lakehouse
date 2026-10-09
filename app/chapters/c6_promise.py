@@ -30,9 +30,11 @@ with main:
     ui.numbers([(f"{100 * budget:.1f}%", "the workload budget: stays flagged for review"),
                 (f"{100 * first.champion_rate:.1f}%", f"flagged in {first.as_of.year - 1} by "
                                                        "the model trained on 2000-2019"),
-                (f"{100 * live.cutoff_rate:.1f}%", f"flagged after the live run's new cutoff, "
-                                                   f"now model v{live.new_version}")])
-    ui.stamp(f"Live · {live.outcome} → v{live.new_version}")
+                *([(f"{100 * live.cutoff_rate:.1f}%", "flagged after the live run's new cutoff, "
+                                                      f"now model v{live.new_version}")]
+                  if pd.notna(live.cutoff_rate) and pd.notna(live.new_version) else [])])
+    ui.stamp(f"Live · {live.outcome}" + (f" → v{live.new_version}" if pd.notna(live.new_version)
+                                         else f", v{live.champion_version} stays"))
 
     champ = alt.Chart(h).encode(
         x=alt.X("cursor:N", sort=order, title=None, axis=alt.Axis(labelAngle=0)),

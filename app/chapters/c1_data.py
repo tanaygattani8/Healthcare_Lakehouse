@@ -4,8 +4,6 @@ import altair as alt
 import ui
 
 df = ui.snapshot("bronze_counts")
-if "layer" not in df.columns:  # snapshots from before phase 2
-    df["layer"] = "bronze"
 captured = df["captured_at"].iloc[0]
 bronze = df[df["layer"] == "bronze"]
 silver = df[df["layer"] == "silver"]

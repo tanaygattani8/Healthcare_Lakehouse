@@ -8,7 +8,6 @@ import ui
 POPULATIONS = {"all": "Every index stay", "no_bypass": "Without bypass-surgery stays"}
 SCORERS = {"base_rate": "Base rate: flag at random", "rule": "One rule: heart disease or stroke",
            "model": "The model (champion)"}
-STATUS = {"stable": "stable", "watch": "watch", "shifted": "shifted", "reference": "reference"}
 FEATURES = {"admit_reason": "Admit reason", "conditions_at_admit": "Conditions at admission",
             "age_at_admit": "Age", "has_cardiovascular_disease": "Heart disease or stroke",
             "days_since_last_discharge": "Days since the last discharge",
@@ -100,7 +99,6 @@ ui.heading("Drift", "Has the data moved since training?")
 main, side = ui.section()
 with main:
     features = drift[drift["drift_check"] == "feature"].assign(
-        status=lambda d: d["status"].map(STATUS),
         kind=lambda d: d["subject"].str.startswith(YES_NO).map(
             {True: "yes/no: judged by its rate", False: "judged by PSI"}),
         subject=lambda d: d["subject"].map(FEATURES).fillna(d["subject"]))
@@ -135,9 +133,13 @@ with main:
         x="period:O", y="value:Q", color="population:N",
         tooltip=["population:N", "period:O", alt.Tooltip("value:Q", format=".1%")])
     ui.figure((band + line).properties(height=240), "5.3",
-              "Share of stays each champion flags per year, with its 95% interval. Its cutoff "
-              "was fixed in training to flag as many as the rule did then: a move away from "
-              "that is drift, not an error. Chapter 6 picks this up.")
+              "Share of stays each live champion flags per year, with its 95% interval. Every "
+              "cutoff is set to flag the workload budget, the rule's rate in training; a move "
+              "away from it is drift, not an error. "
+              + (f"For every stay the champion is v{live.new_version}, whose cutoff chapter 6's "
+                 "live run reset on the latest year, so earlier years can read off budget. "
+                 "Judged on its own windows (E73)." if pd.notna(live.new_version) else
+                 "Chapter 6 picks this up."))
 with side:
     ui.notes("A true/false feature is judged by its rate, not PSI: PSI barely moves on two "
              "values. Heart disease went from 24.9% to 35.4% of stays at a PSI of 0.05.",

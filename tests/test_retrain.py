@@ -144,3 +144,11 @@ def test_shifted_features_names_a_planted_shift():
     before = set(rt.shifted_features(reference, window))
     window = window.assign(age_at_admit=window["age_at_admit"] + 25)
     assert set(rt.shifted_features(reference, window)) - before == {"age_at_admit"}
+
+
+def test_training_window_reads_a_retrained_champion_and_defaults_a_phase_6_one():
+    assert rt.training_window({}) == (rm.PROD_FROM, rm.TRAIN_UNTIL, None)
+    tags = {"train_admit_before": "2024-01-01", "labels_known_by": "2024-12-02",
+            "train_admit_from": "2004-01-01"}
+    assert rt.training_window(tags) == ("2024-01-01", "2024-12-02", "2004-01-01")
+    assert rt.scored_from(tags) == "2024-01-01"

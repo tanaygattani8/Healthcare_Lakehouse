@@ -37,16 +37,14 @@ from scripts import retrain as rt
 C = "healthcare_dev"
 NAME = f"{C}.ml.readmission_{rt.POPULATION}"
 HISTORY = f"{C}.ml.retrain_history"
-# Same trusted types as train_readmission.py (E56).
-TRUSTED_TYPES = ["numpy.dtype", "sklearn.compose._column_transformer._RemainderColsList",
-                 "sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor"]
 mlflow.set_registry_uri("databricks-uc")
 mlflow.set_experiment("/Users/tanaygattani8@gmail.com/readmission")
 client = mlflow.MlflowClient()
 
 as_of = dt.date.fromisoformat(dbutils.widgets.get("as_of"))
 mode = dbutils.widgets.get("mode")
-assert mode in ("replay", "live"), mode
+if mode not in ("replay", "live"):
+    raise ValueError(f"mode must be replay or live, not {mode!r}")
 
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {HISTORY} (
@@ -75,9 +73,7 @@ champion = client.get_model_version_by_alias(NAME, start_alias)
 model = mlflow.sklearn.load_model(f"models:/{NAME}@{start_alias}")
 kind, params = rt.settings(champion.tags if "kind" in champion.tags
                            else client.get_run(champion.run_id).data.params)
-admit_before = champion.tags.get("train_admit_before", rm.PROD_FROM)
-discharged_by = champion.tags.get("labels_known_by", rm.TRAIN_UNTIL)
-admit_from = champion.tags.get("train_admit_from")   # absent before D80: no lower bound
+admit_before, discharged_by, admit_from = rt.training_window(champion.tags)
 
 signals = rm.population(spark.table(f"{C}.gold.readmission_signals").toPandas(),
                         rt.POPULATION)
@@ -86,8 +82,10 @@ w = rt.windows(as_of)
 check = signals[rt.admitted(signals, *w["check"])]
 cutoff = signals[rt.admitted(signals, *w["cutoff"])]
 trained = signals[rt.trained_on(signals, admit_before, discharged_by, admit_from)]
-assert len(check) > 0 and len(cutoff) > 0, "an empty window"
-assert check.index.intersection(trained.index).empty, "the champion trained on the check window"
+if check.empty or cutoff.empty:
+    raise ValueError("an empty window")
+if not check.index.intersection(trained.index).empty:
+    raise ValueError("the champion trained on the check window")
 
 # COMMAND ----------
 
@@ -156,7 +154,7 @@ with mlflow.start_run(run_name=f"retrain-{mode}-{as_of}") as run:
                                         signature=infer_signature(
                                             x_train, retrained.predict_proba(x_train)),
                                         pyfunc_predict_fn="predict_proba",
-                                        skops_trusted_types=TRUSTED_TYPES,
+                                        skops_trusted_types=rm.TRUSTED_TYPES,
                                         registered_model_name=NAME)
         new_version = str(info.registered_model_version)
 row["mlflow_run_id"] = run.info.run_id

@@ -50,7 +50,8 @@ for population in rm.POPULATIONS:
     _, _, prod = rm.split(rm.population(signals, population),
                           prod_from=rt.scored_from(champion.tags))
     expected = int(champion.tags["prod_stays"])
-    assert len(prod) == expected, f"{name}: {len(prod)} production stays, training saw {expected}"
+    if len(prod) != expected:
+        raise ValueError(f"{name}: {len(prod)} production stays, training saw {expected}")
 
     score = model.predict_proba(rm.build_features(prod, population))[:, 1]
     out = pd.DataFrame({

@@ -56,6 +56,22 @@ it is computed from them, and any group of 1-10 is hidden. Chapter 7's numbers
 come from the dashboard's own SQL, and its hospital and insurer names are made
 up before publishing: Synthea takes them from real ones (D77).
 
+## What the code reviews changed
+
+Two more independent reviews followed (D83): ponytail, hunting what to delete,
+and Alibaba's Open Code Review, hunting bugs. They agreed on one finding.
+
+| Found | Fixed |
+|---|---|
+| "k ≥ 5 released" counted fewer columns than the table publishes: 7 people in groups as small as 1 | Suppressed people publish no birth or death detail; the check groups on every published column; a test keeps them in step (E72) |
+| Visit date keys were UTC days, the rest of gold Chicago | Chicago days (E74) |
+| The drift notebook judged every champion by phase 6's windows | Each champion's own windows (E73) |
+| Local Airflow listened on the network with default logins | Loopback only; the password and token secret must be set |
+| A fresh workspace could not set clearance scope | Fixed in the bootstrap (E71) |
+| One-off scripts and copies | Archived or folded into one helper |
+
+Comments are one line each (D82).
+
 ## What the audit changed
 
 After phase 10 an independent reviewer was given the code, not the decision
@@ -338,14 +354,14 @@ column), not a property of semantic layers (D70). Semantic search over medical c
 | Gold tables | 10 |
 | 30-day readmission rate | **17.54%** (201 of 1,146 index stays; phase 5 corrected it, D64 and D68) |
 | Care-gap measures, 2025 | 3 |
-| SQL vs PySpark, rows that differ | **0** of 1,170 and 0 of 1,148 |
+| SQL vs PySpark, rows that differ | **0** of 14,313 stays and 0 of 12,580 patients (both batches, rerun in D83) |
 | FHIR vs CSV, rows that differ | 0 of 4,362 visits and 0 of 2,426 conditions |
 
 **Readmissions are counted per stay, not per encounter.** A hospital
 encounter that starts before the last one ended, or the same day, is the same
 stay. Phase 1's gate counted encounters and got 15.97%. The gold table
 reproduces that exactly when merging is switched off, and
-`sql/readmission_ladder.sql` accounts for every step from there to 17.54%.
+`archive/sql/readmission_ladder.sql` accounts for every step from there to 17.54%.
 Merging moved the denominator, not the numerator: 121 "admissions" were
 really the middle of a stay, each counted as a patient who never came back.
 Every exclusion (died, too little follow-up, hospice) is its own column,
@@ -371,7 +387,7 @@ written with knowledge of the first, so it proves the translation more than
 the rules; the rules were proven against the phase 1 gate.
 
 **FHIR, the job SQL is bad at.** The 25 test patients' FHIR bundles were
-flattened in PySpark and matched the CSVs row for row. Inferring one schema
+flattened in PySpark and matched the CSVs row for row (rerun in D83: still 0 differences). Inferring one schema
 across 20 resource types silently turned a list into text (errors E48); each
 resource type is now parsed with its own stated schema. Patient resources,
 which hold names, are never parsed.
@@ -407,7 +423,10 @@ unchanged, no note still names its patient, and no date was lost.
 
 **Following Safe Harbor was not enough.** Birth year, 3-digit ZIP and gender
 left 467 of 1,148 people alone in their group. The released table drops ZIP,
-uses 5-year bands, and blanks the 143 people still in groups under 5.
+uses 5-year bands, and for the 163 people in groups under 5 or aged 90+ it
+publishes no birth or death detail at all (errors E72: an earlier version
+still showed their 90+ band and whether they had died, which split them
+into groups as small as 1).
 
 The four runs are recorded in MLflow; the scores and group sizes are on the
 app's second page.
@@ -523,7 +542,9 @@ docker compose --env-file ../.env up airflow-init
 docker compose --env-file ../.env up -d
 ```
 
-Open http://localhost:8080 (airflow / airflow) once `docker compose ps` shows
+Open http://localhost:8080 (user `airflow`, the password you set as `_AIRFLOW_WWW_USER_PASSWORD`
+in `.env`; compose refuses to start without it and `AIRFLOW__API_AUTH__JWT_SECRET`, and the UI
+listens on this machine only) once `docker compose ps` shows
 every service `(healthy)`, and trigger the `medallion` DAG by hand. It is never
 scheduled: on Free Edition a timer-driven run can exhaust the daily quota
 unattended. The `retrain` DAG is triggered the same way, one cursor per run:
@@ -576,7 +597,7 @@ there is none.
 | One account, so the owner reads everything | Readers are granted a table, never the hidden table that stores it | Lakeflow stores each pipeline table's rows in a `__materialization_mat_…` table beside it. Its owner reads it unmasked and unfiltered; tagging it does not help, because schema mask policies do not reach it (measured, D79) |
 | One state in the dataset | Row filters segregate by region | The filter works and is verified, but with every patient in Massachusetts it can only be all-rows or no-rows |
 | No GPU, and a daily compute cap | The name model runs on GPU inference | It ran 6.5 hours on a laptop CPU after the cap stopped the Databricks job two hours in. The test set was cut to 25 patients so every program could afford it |
-| A daily compute cap | FHIR flattened for every patient | The FHIR export is 12.8 GB; track A ran on the 25 test patients (316 MB). SQL-vs-PySpark timings are one run at 1,148 patients and are not a ranking |
+| A daily compute cap | FHIR flattened for every patient | The FHIR export is 12.8 GB; track A ran on the 25 test patients (316 MB). SQL-vs-PySpark timings are one run and are not a ranking |
 | Billing visible only hours later | Cost per query from live metering | Text-to-SQL cost is reported as seconds per answer (Genie 16 s, Llama 2 s) |
 | A fixed synthetic calendar, and a daily compute cap | Drift checks on a schedule as new data lands, retraining when they fire | No new data ever arrives, so a date cursor replays history one year per run (D75). Every run is triggered by hand |
 | Unity Catalog model registry | MLflow writes model files straight to catalog storage | Free Edition denies that write; MLflow 3.16.1 with `MLFLOW_USE_DATABRICKS_SDK_MODEL_ARTIFACTS_REPO_FOR_UC` sends it through the Files API instead (E52) |

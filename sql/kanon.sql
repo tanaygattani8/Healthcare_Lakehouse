@@ -1,19 +1,22 @@
--- Phase 3b step 7: k = people sharing birth, death and gender; full spread for plan, safe and released (D56).
+-- Phase 3b step 7: k = people sharing every published birth, death and gender column (D56, E72).
+-- All three versions count the same people: the de-identified ones (deid_key).
 
 CREATE OR REPLACE TABLE healthcare_dev.ops.kanon_spread
 COMMENT "Phase 3b step 7: how many people share each quasi-identifier combination, for three levels of detail. Counts only."
 AS
 WITH plan AS (
     SELECT count(*) AS k FROM healthcare_dev.silver.patient
+    JOIN healthcare_dev.ops.deid_key USING (patient_id)
     GROUP BY birth_date, substring(ZIP, 1, 3), GENDER
 ),
 safe AS (
     SELECT count(*) AS k FROM healthcare_dev.silver.patient
+    JOIN healthcare_dev.ops.deid_key USING (patient_id)
     GROUP BY year(birth_date), substring(ZIP, 1, 3), GENDER
 ),
 released AS (
     SELECT count(*) AS k FROM healthcare_dev.deid.patient
-    GROUP BY birth_year_from, gender, death_year_from
+    GROUP BY birth_year_from, death_year_from, years_suppressed, is_deceased, gender
 ),
 spread AS (
     SELECT 'plan' AS version, k FROM plan

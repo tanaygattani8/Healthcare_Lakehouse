@@ -55,9 +55,9 @@ def trained_on(df: pd.DataFrame, admit_before, discharged_by, admit_from=None) -
     return picked & (admit >= pd.Timestamp(admit_from)) if admit_from else picked
 
 
-def budget(signals: pd.DataFrame) -> float:
+def budget(signals: pd.DataFrame, population: str = POPULATION) -> float:
     """The workload budget: the rule's flag rate on phase 6's training stays."""
-    train, _, _ = rm.split(rm.population(signals, POPULATION))
+    train, _, _ = rm.split(rm.population(signals, population))
     return float(rm.rule_score(train).mean())
 
 
@@ -65,6 +65,12 @@ def settings(source: Mapping[str, str]) -> tuple[str, dict]:
     """A model's kind and settings from string params, cast back to rm.GRID's types."""
     kind = source["kind"]
     return kind, {key: type(value)(source[key]) for key, value in rm.GRID[kind][0].items()}
+
+
+def training_window(tags: Mapping[str, str]) -> tuple[str, str, str | None]:
+    """trained_on's arguments from a champion's tags; phase 6 models default to split()'s."""
+    return (tags.get("train_admit_before", rm.PROD_FROM),
+            tags.get("labels_known_by", rm.TRAIN_UNTIL), tags.get("train_admit_from"))
 
 
 def scored_from(tags: Mapping[str, str]) -> str:
@@ -133,7 +139,5 @@ def shifted_features(reference: pd.DataFrame, window: pd.DataFrame) -> list[str]
     """Features "shifted" against the champion's training stays; they explain, never trigger."""
     x_ref = rm.build_features(reference, POPULATION)
     x_win = rm.build_features(window, POPULATION)
-    kinds = {c: "number" if c in rm.NUMBERS else "flag" if c in rm.FLAGS else "category"
-             for c in x_ref.columns}
-    return [r["feature"] for r in drift.drift_report(x_ref, x_win, kinds)
+    return [r["feature"] for r in drift.drift_report(x_ref, x_win, rm.kinds(x_ref.columns))
             if r["status"] == "shifted"]

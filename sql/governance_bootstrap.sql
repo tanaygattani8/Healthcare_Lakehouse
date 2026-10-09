@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS healthcare_dev.ops.phi_clearance
-  (user_email STRING, level STRING)
+  (user_email STRING, level STRING, scope_state STRING)
   COMMENT 'Who may read PHI unmasked. UC groups are the production upgrade path.';
 
 CREATE OR REPLACE FUNCTION healthcare_dev.ops.is_cleared()
