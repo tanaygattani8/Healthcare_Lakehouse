@@ -384,7 +384,8 @@ Aggregates only, never row-level: twelve rows of entity and count.
 **Invoked as:** trigger `medallion` at http://localhost:8080, or
 `docker compose --env-file ../.env exec airflow-scheduler airflow dags trigger medallion`
 from `orchestration/`. Never on a schedule (`schedule=None`).
-**Reads:** the root `.env` (via compose), `MEDALLION_PIPELINE_ID`, `DATABRICKS_HTTP_PATH` (the gate's warehouse)
+**Reads:** the root `.env` (via compose), `MEDALLION_PIPELINE_ID`, `DATABRICKS_HTTP_PATH` (the gate's warehouse),
+`_AIRFLOW_WWW_USER_PASSWORD` and `AIRFLOW__API_AUTH__JWT_SECRET` (required; the UI binds 127.0.0.1, D83)
 **Writes:** nothing itself — it starts one pipeline update
 
 ```
@@ -544,11 +545,12 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
   the landing volume and `sql/load_detections.sql`.
 - **Marking**: `sql/score_detection.sql` -> `ops.detection_score`, rewritten
   after recall came out at 1.053 (E45). Logged to MLflow by
-  `scripts/log_mlflow.py`.
+  `archive/scripts/log_mlflow.py`.
 - **De-identified copy**: `sql/deid.sql` builds `ops.deid_key` (the secret),
   the `ops.deid_text` Python function, and `deid.patient`, `deid.encounter`,
   `deid.note`. `sql/check_deid.sql` proves it. `sql/kanon.sql` ->
-  `ops.kanon_spread`.
+  `ops.kanon_spread`, grouping on every birth, death and gender column
+  `deid.patient` publishes (E72; `tests/test_kanon_covers_deid.py`).
 - **Published**: `scripts/publish_snapshot.py` now also writes
   `snapshots/deid_scores.parquet` and `deid_kanon.parquet`, and refuses any
   text that is not a known category. `app/pages/2_De-identification.py`.
@@ -570,7 +572,7 @@ wrong `scope_state` makes gold empty. Neither raises an error (D47).
   `readmission_events.sql`. Proven against a rerun of the phase 1 gate
   (`scripts.readmission_gate --report data/readmission-gate-today.md`, never
   the default report path, which is the committed phase 1 record);
-  `sql/readmission_ladder.sql` accounts for the rate change (D58).
+  `archive/sql/readmission_ladder.sql` accounts for the rate change (D58).
 - **Care gaps** (step 4): `measure_code.sql` (every code, one place) then
   `care_gap.sql`, for the last complete year (D59).
 - **One row per patient** (step 5): `patient_360.sql`, built last because it
@@ -599,13 +601,13 @@ then `scripts.publish_snapshot`.
 ### Cycle 16 — 2026-09-30 to 10-03 · Phase 5 · the readmission story and text-to-SQL
 
 1. **Probes**: `archive/sql/probe_phase5.sql` (P1 metric views, P3 `ai_query` and
-   billing) and `scripts/probe_genie.py` (P2), with a throwaway Genie space.
+   billing) and `archive/scripts/probe_genie.py` (P2), with a throwaway Genie space.
 2. **`gold.readmission_signals`** (and `planned_procedure`, D64/D68): listed
    in `databricks.yml`, `bundle deploy -t dev`, a `--validate-only` update
    **left to finish**, then `refresh_selection` on
    `planned_procedure, readmission_events, readmission_signals, patient_360`.
    Then `notebooks/gold_pyspark.py` and `notebooks/reconcile_gold.py` as jobs
-   (upload with `MSYS_NO_PATHCONV=1`, E51), and `sql/readmission_ladder.sql`.
+   (upload with `MSYS_NO_PATHCONV=1`, E51), and `archive/sql/readmission_ladder.sql`.
 3. **`sql/check_gold.sql`**: every `_must_be_0` is 0, and 10,724 / 140.
 4. **The question sets**: `eval/questions_dev.yaml` (Claude), then
    `eval/questions_test.yaml` (the user), frozen into
@@ -651,7 +653,8 @@ own tests; `publish_snapshot` calls it, so the app does no statistics.
 5. **`score_readmission`** loads each `@champion`, checks the production
    count against the `prod_stays` tag, and replaces that version's rows in
    `ml.readmission_scores`.
-6. **`drift_readmission`** loads both champions and appends one batch to
+6. **`drift_readmission`** loads both champions, takes each one's training and
+   scoring windows from its tags (E73), and appends one batch to
    `ml.drift_report` (`drift_report` for features, PSI for scores against
    out-of-fold training scores, Wilson for flag and readmission rates), plus
    an MLflow run tagged `drift`.
@@ -768,7 +771,7 @@ after checking `databricks pipelines list-updates <id>` yourself.
 2. **Rules**: `scripts/retrain.py` and `tests/test_retrain.py`;
    `rm.patient_resamples` pulled out of `bootstrap_difference`, pinned by a
    test.
-3. **Before-record**: `sql/ml_fingerprint.sql` and the registry aliases.
+3. **Before-record**: `archive/sql/ml_fingerprint.sql` and the registry aliases.
 4. **Scoring**: the `scored_from` line in `score_readmission`, then a
    rescore on v2; the fingerprint matched exactly.
 5. **One cursor by hand**: `notebooks/retrain_readmission.py` and
@@ -880,3 +883,15 @@ gh pr merge --squash -> push to main -> the same three jobs re-run
 6. Pull request #5 (broken import) read `BLOCKED`; a direct push to `main`
    was refused (GH006).
 7. Docs; 8. merged through the gate.
+
+### Cycle 24 — 2026-10-09 · two code reviews (D82, D83)
+
+1. Ponytail and Open Code Review subagents, each on its own worktree of `main`.
+2. Comments to one line each, checked code-identical by AST/SQL diff; #8 merged.
+3. Fixes (E71-E74) and cuts; ruff, pytest.
+4. `bundle deploy -t dev`, `--validate-only`, then a normal update (a
+   `refresh_selection` naming `gold.gold_checks` is refused: it is a private
+   table in bronze). `deid.patient` rebuilt alone, then `sql/kanon.sql`.
+5. `fhir_flatten`, `gold_pyspark` -> `reconcile_gold`, `drift_readmission` as
+   jobs; `publish_snapshot`.
+6. App checked in the preview; docs; PR, merged through the gate.

@@ -27,6 +27,7 @@ import pandas as pd
 
 from scripts import drift
 from scripts import readmission_model as rm
+from scripts import retrain as rt
 from scripts.readmission_story import wilson
 
 C = "healthcare_dev"
@@ -48,9 +49,7 @@ def add(check, period, subject, value, status, low=NAN, high=NAN):
 
 # Features: "all" only; "no_bypass" is a subset of it (decision P-k).
 x_train, x_prod = rm.build_features(train, "all"), rm.build_features(prod, "all")
-kinds = {c: "number" if c in rm.NUMBERS else "flag" if c in rm.FLAGS else "category"
-         for c in x_train.columns}
-for r in drift.drift_report(x_train, x_prod, kinds):
+for r in drift.drift_report(x_train, x_prod, rm.kinds(x_train.columns)):
     add("feature", "2020-2026", r["feature"], r["psi"], r["status"])
 
 for population in rm.POPULATIONS:
@@ -58,11 +57,15 @@ for population in rm.POPULATIONS:
     champion = client.get_model_version_by_alias(name, "champion")
     model = mlflow.sklearn.load_model(f"models:/{name}@champion")
     threshold = float(champion.tags["alert_threshold"])
-    tr, pr = rm.population(train, population), rm.population(prod, population)
+    # The champion's own training and scoring windows, as scoring uses them (E73).
+    stays = rm.population(signals, population)
+    tr = stays[rt.trained_on(stays, *rt.training_window(champion.tags))]
+    _, _, pr = rm.split(stays, prod_from=rt.scored_from(champion.tags))
     # The reference is out-of-fold, as the cutoff was (D72).
     s_tr = rm.oof_scores(model, tr, population)
     s_pr = model.predict_proba(rm.build_features(pr, population))[:, 1]
-    share = float((s_tr >= threshold).mean())
+    # Every cutoff, phase 6's or a retrain's, is set to flag the rule's training rate.
+    share = rt.budget(signals, population)
     years = pd.to_datetime(pr["admit_day"]).dt.year.to_numpy()
     for year in sorted(set(years)):
         part = s_pr[years == year]

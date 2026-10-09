@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import re
+from collections import Counter
 from pathlib import Path
 
 from scripts import dbx
@@ -162,13 +163,10 @@ def main() -> None:
                          "phi_category", "surface_text"])
         writer.writerows(spans)
 
-    by_category: dict[str, int] = {}
-    for span in spans:
-        by_category[span[3]] = by_category.get(span[3], 0) + 1
-
+    by_category = Counter(s[3] for s in spans)
     with_spans = len({s[0] for s in spans})
     print(f"\n{len(spans)} spans written to {args.out}")
-    for category, count in sorted(by_category.items(), key=lambda x: -x[1]):
+    for category, count in by_category.most_common():
         print(f"  {category:<12} {count:>7}")
     duplicates = len(spans) - len({s[:3] for s in spans})
     print(f"\npositions recorded more than once: {duplicates}")

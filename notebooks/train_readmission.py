@@ -32,9 +32,6 @@ C = "healthcare_dev"
 mlflow.set_registry_uri("databricks-uc")
 mlflow.set_experiment("/Users/tanaygattani8@gmail.com/readmission")
 client = mlflow.MlflowClient()
-# skops loads only trusted types (E56); stored with the model so scoring reuses the list.
-TRUSTED_TYPES = ["numpy.dtype", "sklearn.compose._column_transformer._RemainderColsList",
-                 "sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor"]
 
 
 def metrics(row, *keys):
@@ -103,7 +100,7 @@ for population in rm.POPULATIONS:
                                         signature=infer_signature(
                                             x_train, pipe.predict_proba(x_train)),
                                         pyfunc_predict_fn="predict_proba",
-                                        skops_trusted_types=TRUSTED_TYPES,
+                                        skops_trusted_types=rm.TRUSTED_TYPES,
                                         registered_model_name=name)
     version = info.registered_model_version
     client.set_registered_model_alias(name, "champion", version)

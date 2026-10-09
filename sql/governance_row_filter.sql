@@ -1,7 +1,6 @@
 -- Phase 3a row filter on STATE (row_scope tag); all patients are in MA, and a mismatch empties gold silently.
 
--- Fails on re-run (no IF NOT EXISTS), so left commented once the column exists.
--- ALTER TABLE healthcare_dev.ops.phi_clearance ADD COLUMNS (scope_state STRING);
+-- scope_state is created by governance_bootstrap.sql (E71).
 
 -- '*' is every state; set before the policy, since NULL hides every row.
 UPDATE healthcare_dev.ops.phi_clearance
