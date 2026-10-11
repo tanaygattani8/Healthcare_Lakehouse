@@ -1,0 +1,31 @@
+name: Keep app awake
+
+# Streamlit Community Cloud sleeps an app after about 12 h without visitors; a headless visit every 6 h keeps it up (D84).
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: pip install playwright==1.47.0 && python -m playwright install --with-deps chromium
+
+      - shell: python
+        run: |
+          from playwright.sync_api import TimeoutError, sync_playwright
+          with sync_playwright() as p:
+              page = p.chromium.launch().new_page()
+              page.goto("https://healthcarelakehouse.streamlit.app/", timeout=120_000)
+              try:
+                  page.get_by_role("button", name="Yes, get this app back up!").click(timeout=15_000)
+                  print("asleep: woke it")
+              except TimeoutError:
+                  print("awake")
+              # Stay connected long enough to count as a visit, or for a woken app to boot.
+              page.wait_for_timeout(90_000)

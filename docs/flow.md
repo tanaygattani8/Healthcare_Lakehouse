@@ -895,3 +895,11 @@ gh pr merge --squash -> push to main -> the same three jobs re-run
 5. `fhir_flatten`, `gold_pyspark` -> `reconcile_gold`, `drift_readmission` as
    jobs; `publish_snapshot`.
 6. App checked in the preview; docs; PR, merged through the gate.
+
+### Cycle 25 — 2026-10-11 · diagrams and a wake-up (D84)
+
+1. Archify: an overview diagram and one per phase, each through validate,
+   deliver, check and browser-check, and looked at in light and dark.
+2. The overview on GitHub Pages from a `gh-pages` branch holding only it.
+3. The live app showed Streamlit's sleep page (E75); `keep-awake.yml`.
+4. Docs; PR, merged through the gate.

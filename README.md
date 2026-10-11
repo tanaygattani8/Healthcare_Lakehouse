@@ -7,6 +7,8 @@ analytics → ML. Orchestrated with Airflow, deployed as a public Streamlit app.
 
 **Live:** https://healthcarelakehouse.streamlit.app/
 
+**Architecture diagram:** https://tanaygattani8.github.io/Healthcare_Lakehouse/ (interactive; the app is kept awake by a scheduled visit, D84)
+
 **Status:** An independent audit challenged every decision; its three findings a reader could check (two unmasked PHI copies, a hidden count of 10 recoverable by subtraction, a prod target never deployed) are fixed (D79). Its fourth changed the ML verdict: trained from 2000 rather than 1915, and judged at the cutoff it would run at, the model beats the rule it was first said to match (D80). The rest of its findings are fixed too (D81); see [What the audit changed](#what-the-audit-changed). Phase 10 complete: `main` only changes through a pull request
 whose `lint`, `bundle` and `dags` checks are green, admins included (D78).
 The public app was redesigned (D76): the home page is the pipeline drawn
