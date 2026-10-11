@@ -1950,3 +1950,12 @@ used UTC days; the rest of gold uses Chicago days (D35, D81). An evening
 visit on 31 December keyed into the next year.
 
 **Fix.** Both use `from_utc_timestamp(..., 'America/Chicago')`.
+
+### E75 — the app "crashed" when nobody had opened it for a while {#e75}
+
+**Cause.** It had not crashed: Streamlit Community Cloud sleeps any app with
+no visitors for about 12 hours and shows "This app has gone to sleep due to
+inactivity" until someone clicks to wake it. Nothing in the app causes or
+prevents this.
+
+**Fix.** A scheduled headless visit every 6 hours (D84).

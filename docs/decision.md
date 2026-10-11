@@ -3339,3 +3339,23 @@ without a parameter nobody passed, and two dead bits of the app.
 - Two copies of the leak prefixes (model and story): each guard stands alone.
 - The shared note-file helper: it would tie the standalone NER script to the
   Databricks connector to save two lines.
+
+### D84 — the app is kept awake, the diagram is on Pages
+
+**Why.** Streamlit Community Cloud puts an app to sleep after about 12 hours
+without visitors; the next visitor sees a "gone to sleep" page and has to
+click to wake it (E75). The architecture diagram needed a public home that
+is not a chat link.
+
+**Decided.**
+- `.github/workflows/keep-awake.yml` opens the app in headless Chromium every
+  6 hours, clicks the wake button if it is there, and stays 90 s. It has no
+  token permissions and no secrets. GitHub pauses scheduled workflows after
+  60 days without repository activity and emails first; re-enabling is one
+  click in the Actions tab.
+- The overview diagram is served by GitHub Pages from a `gh-pages` branch
+  that holds only that page: https://tanaygattani8.github.io/Healthcare_Lakehouse/.
+  `main` and its gate are untouched; updating it is a new commit on `gh-pages`.
+
+**Rejected.** Moving the app to Cloud Run (needs a card on file) or Hugging
+Face Spaces (still sleeps, with a slower cold start).
