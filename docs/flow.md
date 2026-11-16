@@ -903,3 +903,10 @@ gh pr merge --squash -> push to main -> the same three jobs re-run
 2. The overview on GitHub Pages from a `gh-pages` branch holding only it.
 3. The live app showed Streamlit's sleep page (E75); `keep-awake.yml`.
 4. Docs; PR, merged through the gate.
+
+### Cycle 26 — 2026-11-16 · the keep-awake job's runner moved (E76)
+
+1. A scheduled run failed in `pip install`; the last passing run's log said
+   `ubuntu-24.04`, the failing one `ubuntu-26.04` and Python 3.14.
+2. Runner and Python pinned; the workflow run by hand on the branch.
+3. PR, merged through the gate.
