@@ -1959,3 +1959,15 @@ inactivity" until someone clicks to wake it. Nothing in the app causes or
 prevents this.
 
 **Fix.** A scheduled headless visit every 6 hours (D84).
+
+### E76 — the keep-awake job broke with no change to the repo {#e76}
+
+**Cause.** `keep-awake.yml` ran on `ubuntu-latest` with the runner's own
+Python. On 2026-11-16 GitHub moved the label from `ubuntu-24.04` (Python
+3.12) to `ubuntu-26.04` (Python 3.14). Playwright 1.47.0 pins greenlet
+3.0.3, which has no 3.14 wheel and does not compile against it, so `pip
+install` failed before the app was visited. The Playwright version was
+pinned; the machine and the Python under it were not.
+
+**Fix.** `runs-on: ubuntu-24.04` and `actions/setup-python` at 3.12, the
+environment the job had passed on for a month.
